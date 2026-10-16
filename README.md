@@ -1,13 +1,8 @@
 # crossjp
 
-EPUB and plain-text reader for the Xteink X3 and X4. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
+EPUB and plain-text reader for the Xteink X4 Classic. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
 
-One firmware binary per device. Pages are rendered for that panel:
-
-| Device | Panel (landscape) | UI / pages (portrait) |
-| ------ | ----------------- | --------------------- |
-| X3     | 792×528           | 528×792               |
-| X4     | 800×480           | 480×800               |
+The panel is 800×480 landscape. UI and pages are 480×800 portrait.
 
 ## Layout
 
@@ -19,7 +14,7 @@ src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
 lib/Typesetter        EPUB and UTF-8 text layout
-lib/XgfFont           reading font
+lib/XgfFont           on-device TrueType rasterizer
 lib/EpdFont           Ubuntu UI fonts
 reference/            CrossPoint submodule (lookup only)
 freeink-sdk/          display and board support
@@ -31,18 +26,19 @@ Boot and runtime logs go to the Serial console only (no SD log file).
 Firmware update from SD (same idea as CrossPoint):
 
 - Settings → **Update firmware** → pick a `.bin` → confirm.
-- Recovery picker: hold **up + power** at wake. Back returns to home.
+- Recovery picker: hold **Down + Power** at wake (side-right + power). Side-left is GPIO0, a boot strap. Back returns to home.
 
-Flash the matching env's `.bin` (X3 firmware on an X4, or the reverse, will not drive the panel). The stock Xteink updater is gone once this firmware is installed.
+Reading fonts are TrueType files (`.ttf`, `.otf`, `.ttc`) under `/.crossjp/fonts/`. The device rasterizes them. The FreeType build has no CFF driver, so a CFF OpenType such as Hiragino Mincho will not open. Use a TrueType or TrueType-collection face. Face index 0 of a `.ttc` is used.
+
+The stock Xteink updater is gone once this firmware is installed.
 
 ## Build
 
-Default env is `x3`. Separate binary per device — do not combine them.
+One env, `x4c`: ESP32-S3, 16 MB flash, 8 MB octal PSRAM, 1-bit SDMMC.
 
 ```bash
-pio run              # env:x3
-pio run -e x4
-pio run -e x3 -t upload
+pio run              # env:x4c
+pio run -e x4c -t upload
 pio device monitor
 ```
 
@@ -55,7 +51,7 @@ git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-GitHub Actions builds `crossjp-x3.bin` and `crossjp-x4.bin` and attaches them to a GitHub Release for that tag.
+GitHub Actions builds `crossjp-x4c.bin` and attaches it to a GitHub Release for that tag.
 
 Optional `platformio.local.ini` for a local upload port (gitignored).
 

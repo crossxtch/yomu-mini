@@ -1,14 +1,16 @@
 ---
 name: heap-discipline
-description: "Memory allocation discipline for the ESP32-C3 (~380KB RAM, no PSRAM, single framebuffer). Use whenever writing or reviewing code that allocates: new / malloc / std::vector / std::string, buffers, caches, or anything held across a loop or a screen lifecycle. Covers makeUniqueNoThrow vs raw new/malloc, fragmentation avoidance, reserve-before-push_back, alloc-once-reuse, stack vs heap sizing, and ScratchHeap."
+description: "Memory allocation discipline for the X4 Classic (ESP32-S3, 8 MB PSRAM, one framebuffer in internal DRAM). Use whenever writing or reviewing code that allocates: new / malloc / std::vector / std::string, buffers, caches, or anything held across a loop or a screen lifecycle. Covers makeUniqueNoThrow vs raw new/malloc, fragmentation avoidance, reserve-before-push_back, alloc-once-reuse, stack vs heap sizing, ScratchHeap, and which allocations belong in PSRAM."
 ---
 
-# Heap Discipline (ESP32-C3)
+# Heap Discipline (X4 Classic)
 
-The constraint that makes every call matter: ~380KB RAM, no PSRAM, one
-framebuffer. **Fragmentation, not total usage, is what kills this device.**
-Free-heap can read fine while the largest free block is too small for the next
-allocation. Optimize for not leaving holes, not just for using fewer bytes.
+Internal DRAM is still the scarce resource: one framebuffer, Wi-Fi, and the
+32 KB deflate window live there. **Fragmentation, not total usage, is what
+kills a large internal allocation.** Free-heap can read fine while the largest
+free block is too small. 8 MB of octal PSRAM holds the reading face, FreeType,
+and the glyph cache (`fiFontMalloc` / `MALLOC_CAP_SPIRAM`). Do not put the
+deflate window or the framebuffer in PSRAM.
 
 `ScratchHeap` is the one large hole. `main` reserves it before the framebuffer
 so the framebuffer does not split the heap. Borrowers write
@@ -23,8 +25,8 @@ the `Gfx` framebuffer (`startGrayscaleBase`, `copyGrayscaleLsbBuffers`,
 Ask in order; stop at the first yes.
 
 1. **Stack?** Local, bounded, under ~256 bytes total: plain array/struct. No
-   heap, no fragmentation. Keep frames lean; the loop task stack is 12 KB
-   because EPUB inflate, `FatFile::write`, and the SD SPI wait share it.
+   heap, no fragmentation. Keep frames lean; the loop task stack is 24 KB
+   because FreeType face open and EPUB inflate share it.
 2. **Compile-time constant?** `static constexpr` lives in flash, costs zero DRAM.
 3. **Allocated once and reused for a screen's lifetime?** Allocate in
    `onEnter`, hold in a member, release in `onExit`. Never per-frame, never

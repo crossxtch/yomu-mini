@@ -1,72 +1,20 @@
+#include <BatteryMonitor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
-#include <PowerManager.h>
-#include <SPI.h>
-#include <Wire.h>
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
 
-namespace X3GPIO {
-
-bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  if (Wire.requestFrom(addr, static_cast<uint8_t>(2), static_cast<uint8_t>(true)) < 2) {
-    while (Wire.available()) {
-      Wire.read();
-    }
-    return false;
-  }
-  const uint8_t lo = Wire.read();
-  const uint8_t hi = Wire.read();
-  *outValue = (static_cast<uint16_t>(hi) << 8) | lo;
-  return true;
-}
-
-bool readBQ27220CurrentMA(int16_t* outCurrent) {
-  uint16_t raw = 0;
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_CUR_REG, &raw)) {
-    return false;
-  }
-  *outCurrent = static_cast<int16_t>(raw);
-  return true;
-}
-
-}  // namespace X3GPIO
-
 void HalGPIO::begin() {
-#if FREEINK_DEVICE_X3 && !FREEINK_DEVICE_X4
-  _deviceType = DeviceType::X3;
-  BoardConfig::selectDevice(BoardConfig::Board::XteinkX3);
-#elif FREEINK_DEVICE_X4 && !FREEINK_DEVICE_X3
-  _deviceType = DeviceType::X4;
-  BoardConfig::selectDevice(BoardConfig::Board::XteinkX4);
-#else
-#error "Build one device per firmware env (e.g. -DFREEINK_DEVICE_X3=1)."
+#if !FREEINK_DEVICE_X4CLASSIC
+#error "crossjp builds for the X4 Classic only (-DFREEINK_DEVICE_X4CLASSIC=1)."
 #endif
-
-  // Per-batch panel: X3 UC8253/UC8279, X4 SSD1677/UC8179. Probe before SPI
-  // owns the display pins. X3's facade keys off the sibling board profile.
+  BoardConfig::selectDevice(BoardConfig::Board::XteinkX4Classic);
+  // SSD1677 / UC8179 / UC8279, from the panel VER register, before the display
+  // bus owns the pins.
   freeink::applyXteinkDisplayController();
-#if FREEINK_DEVICE_X3
-  if (BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
-    BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
-  }
-#endif
-
-
-  SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
-
-#if FREEINK_DEVICE_X4
-  pinMode(BAT_GPIO0, INPUT);
-  pinMode(UART0_RXD, INPUT);
-#endif
   inputMgr.begin();
 }
 
@@ -129,18 +77,6 @@ void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
 }
 
-bool HalGPIO::hasEdgeSideButtons() const {
-  return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
-         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
-         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro;
-}
-
-bool HalGPIO::isXteinkDevice() const {
-  return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
-         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
-         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4;
-}
-
 bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed) {
   // X4 Pro wakes on any power-button press; other boards retain the configured
   // hold-duration verification below.
@@ -183,22 +119,13 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
 }
 
 bool HalGPIO::isUsbConnected() const {
-  if (deviceIsX3()) {
-    // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
-    // Positive current means charging.
-    for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-      int16_t currentMa = 0;
-      if (X3GPIO::readBQ27220CurrentMA(&currentMa)) {
-        return currentMa > 0;
-      }
-      delay(2);
-    }
-    return false;
+  if (BoardConfig::ACTIVE.usbDetect >= 0) {
+    return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
   }
-  if (BoardConfig::ACTIVE.usbDetect < 0) {
-    return false;
-  }
-  return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
+  // X4 Classic has no USB-detect GPIO. The CW2017 only sees charge current,
+  // so a full battery on the cable reads as unplugged.
+  static const BatteryMonitor battery;
+  return battery.isCharging();
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {

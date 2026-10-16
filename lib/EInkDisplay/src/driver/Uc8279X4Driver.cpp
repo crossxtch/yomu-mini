@@ -1,10 +1,8 @@
 #include "Uc8279X4Driver.h"
 
 #include <Arduino.h>
-
-#include <string.h>
-
 #include <BoardConfig.h>
+#include <string.h>
 
 // Orientation of the visible-row stream, switchable per build for field A/B.
 // Defaults (0/0) = the stock convention, HARDWARE-CONFIRMED upright on a field
@@ -136,8 +134,12 @@ void Uc8279X4Driver::initController(EpdBus& bus) {
   bus.cmd(CMD_PFS);
   bus.data(_cfg.pfs);
 
-  bus.cmd(CMD_PLL);
-  bus.data(_cfg.pll);
+  // The stock X4 Classic UC8279 PLL hook is a no-op. Other X4-family panels
+  // program the PLL here.
+  if (!BoardConfig::isX4Classic()) {
+    bus.cmd(CMD_PLL);
+    bus.data(_cfg.pll);
+  }
 
   bus.cmd(CMD_GATE_SCAN);
   bus.data(_cfg.gateScan);
@@ -166,8 +168,7 @@ void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb,
   // bytes as-is. The ROWREV/XMIRROR switches (row reversal / reversed byte order
   // + reversed bits) exist for future panel sub-variants whose scan differs.
   // AA planes are sent bitwise-inverted per the vendor reference.
-  static const uint8_t kBitRev[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
-                                      0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
+  static const uint8_t kBitRev[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
   for (uint16_t n = 0; n < _h; n++) {
     const uint16_t y = FREEINK_UC8279X4_ROWREV ? static_cast<uint16_t>(_h - 1 - n) : n;
     const uint8_t* src = fb + static_cast<uint32_t>(y) * _wb;

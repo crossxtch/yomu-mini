@@ -16,7 +16,7 @@ class FileTransferServer {
   ~FileTransferServer();
 
   // Starts listening on port 80. Call once Wi-Fi is connected. Advertises
-  // "x3.local"/"x4.local" via mDNS depending on the running device.
+  // "x4c.local" via mDNS.
   bool begin();
   void stop();
   void handleClient();

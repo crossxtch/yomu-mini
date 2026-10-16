@@ -18,14 +18,14 @@ struct Settings {
   uint8_t gyroAutoOffSeconds = 60;  // IMU auto-lock; 0 = none, else 30/45/60. Same slot as old clockModeSeconds.
   uint8_t refreshEveryNPages = 5;
   uint8_t nightMode = 0;
-  uint8_t tiltPageTurn = 0;  // 0 = off, 1 = on (flick either direction pages forward, X3 only)
+  uint8_t tiltPageTurn = 0;  // 0 = off, 1 = on (flick either direction pages forward)
   char lastBookPath[200]{};
   uint8_t trueSleepMinutes = kSleepNone;  // deep sleep; see kSleep*
-  uint8_t clockHasBeenSynced = 0;  // set after a successful NTP write to the RTC
-  uint8_t clockUtcOffsetQ = 48;    // 48 = UTC+0; 15-minute steps, 0 = UTC-12, 104 = UTC+14
-  uint16_t ntpSyncYear = 0;        // UTC year of last NTP; 0 = never
-  uint8_t ntpSyncMonth = 0;        // 1-12; NTP at most once per calendar month
-  char fontFile[80]{};  // basename in /.crossjp/fonts/; empty = first installed
+  uint8_t clockHasBeenSynced = 0;         // set after a successful NTP write to the RTC
+  uint8_t clockUtcOffsetQ = 48;           // 48 = UTC+0; 15-minute steps, 0 = UTC-12, 104 = UTC+14
+  uint16_t ntpSyncYear = 0;               // UTC year of last NTP; 0 = never
+  uint8_t ntpSyncMonth = 0;               // 1-12; NTP at most once per calendar month
+  char fontFile[80]{};                    // basename in /.crossjp/fonts/; empty = first installed
   // Was the UI language. Kept so settings.bin stays the same size.
   uint8_t reservedLanguage = 0;
 

@@ -9,7 +9,7 @@
 
 #include "core/Settings.h"
 
-namespace {
+namespace fontfile {
 
 bool endsWithI(const char* name, const char* ext) {
   const size_t n = strlen(name);
@@ -29,9 +29,10 @@ bool endsWithI(const char* name, const char* ext) {
   return true;
 }
 
+bool fontExt(const char* name) { return endsWithI(name, ".ttf") || endsWithI(name, ".otf") || endsWithI(name, ".ttc"); }
+
 bool illegalFatChar(const char c) {
-  return c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' ||
-         c == '|';
+  return c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|';
 }
 
 bool firstFilename(char* out, const size_t outSize) {
@@ -57,29 +58,23 @@ bool firstFilename(char* out, const size_t outSize) {
   return false;
 }
 
-}  // namespace
+bool stripDuplicateExt(char* name) {
+  const size_t n = strlen(name);
+  for (const char* ext : {".ttf", ".otf", ".ttc"}) {
+    const size_t e = strlen(ext);
+    if (n > e * 2 && endsWithI(name, ext) && endsWithI(name + n - e * 2, ext)) {
+      name[n - e] = '\0';
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace fontfile
 
 void ReadingFont::migrate() {
   Storage.ensureDirectoryExists(Settings::kDir);
   Storage.ensureDirectoryExists(kDir);
-  if (!Storage.exists(kLegacyPath)) {
-    return;
-  }
-  char dest[192];
-  makePath(dest, sizeof(dest), "reading.xgf2");
-  if (!Storage.exists(dest)) {
-    if (!Storage.rename(kLegacyPath, dest)) {
-      LOG_ERR("FONT", "Could not move %s -> %s", kLegacyPath, dest);
-      return;
-    }
-    LOG_INF("FONT", "Moved legacy font to %s", dest);
-  } else if (!Storage.remove(kLegacyPath)) {
-    LOG_ERR("FONT", "Could not remove leftover %s", kLegacyPath);
-    return;
-  }
-  if (!settings.fontFile[0]) {
-    setActive("reading.xgf2");
-  }
 }
 
 bool ReadingFont::isFontFilename(const char* name) {
@@ -87,11 +82,11 @@ bool ReadingFont::isFontFilename(const char* name) {
     return false;
   }
   const size_t n = strlen(name);
-  if (n > kMaxFileName || !endsWithI(name, ".xgf2")) {
+  if (n > kMaxFileName || !fontfile::fontExt(name)) {
     return false;
   }
   for (size_t i = 0; i < n; ++i) {
-    if (illegalFatChar(name[i])) {
+    if (fontfile::illegalFatChar(name[i])) {
       return false;
     }
   }
@@ -108,10 +103,13 @@ bool ReadingFont::copyFilename(char* out, const size_t outSize, const char* name
   }
   const char* slash = strrchr(name, '/');
   const char* base = slash ? slash + 1 : name;
-  if (!isFontFilename(base) || strlen(base) >= outSize) {
+  snprintf(out, outSize, "%s", base);
+  // A save panel that appends the extension again yields "Face.ttf.ttf".
+  fontfile::stripDuplicateExt(out);
+  if (!isFontFilename(out)) {
+    out[0] = '\0';
     return false;
   }
-  snprintf(out, outSize, "%s", base);
   return true;
 }
 
@@ -131,12 +129,8 @@ bool ReadingFont::activePath(char* out, const size_t outSize) {
     }
   }
   char name[kMaxFileName + 1];
-  if (firstFilename(name, sizeof(name))) {
+  if (fontfile::firstFilename(name, sizeof(name))) {
     makePath(out, outSize, name);
-    return true;
-  }
-  if (Storage.exists(kLegacyPath)) {
-    snprintf(out, outSize, "%s", kLegacyPath);
     return true;
   }
   out[0] = '\0';

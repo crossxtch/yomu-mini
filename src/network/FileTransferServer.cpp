@@ -1,7 +1,5 @@
 #include "network/FileTransferServer.h"
 
-#include "network/FileTransferDetail.h"
-
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <HalGPIO.h>
@@ -17,6 +15,7 @@
 #include "core/BookCache.h"
 #include "core/ReadingFont.h"
 #include "core/Settings.h"
+#include "network/FileTransferDetail.h"
 #include "network/html/FileManagerPage.h"
 
 #ifndef CROSSJP_VERSION
@@ -63,7 +62,7 @@ bool FileTransferServer::begin() {
   upload.writeBuffer = makeUniqueNoThrow<uint8_t[]>(UploadState::kWriteBufferSize);
   upload.writeBufferPos = 0;
 
-  mdnsHostname = gpio.deviceIsX3() ? "x3" : "x4";
+  mdnsHostname = "x4c";
   mdnsStarted = MDNS.begin(mdnsHostname.c_str());
   if (mdnsStarted) {
     MDNS.addService("http", "tcp", 80);
@@ -72,8 +71,8 @@ bool FileTransferServer::begin() {
   } else {
     LOG_ERR("XFER", "mDNS failed to start");
     mdnsHostname.clear();
-    LOG_INF("XFER", "Server started on port 80, freeHeap=%u maxAlloc=%u",
-            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    LOG_INF("XFER", "Server started on port 80, freeHeap=%u maxAlloc=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+            static_cast<unsigned>(ESP.getMaxAllocHeap()));
   }
   return true;
 }

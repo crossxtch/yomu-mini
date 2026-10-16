@@ -41,8 +41,8 @@ void paintDeepSleepWhite() {
 }
 
 int iosPtToPx(const int pt) {
-  // iOS point: 1pt = 1/163 inch. X3 3.7" 528×792 ≈ 259 PPI; X4 4.26" 800×480 ≈ 219 PPI.
-  const int ppi = gpio.deviceIsX3() ? 259 : 219;
+  // iOS point: 1pt = 1/163 inch. X4 Classic 4.26" 800×480 ≈ 219 PPI.
+  const int ppi = 219;
   return (pt * ppi + 163 / 2) / 163;
 }
 

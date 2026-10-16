@@ -222,9 +222,9 @@ footer {
   <div id="dropZone">
     <div class="drop-kicker">upload</div>
     <div class="drop-title">Drop a file</div>
-    <div class="drop-sub">.epub · .txt · .xgf2 fonts · firmware .bin</div>
+    <div class="drop-sub">.epub · .txt · .ttf fonts · firmware .bin</div>
   </div>
-  <input type="file" id="fileInput" accept=".epub,.txt,.xgf2,.bin">
+  <input type="file" id="fileInput" accept=".epub,.txt,.ttf,.otf,.ttc,.bin">
   <div id="uploadProgress"><span id="uploadBar"></span></div>
   <div id="toolbar">
     <button id="cancelUpload" onclick="cancelUpload()">Cancel</button>
@@ -284,7 +284,7 @@ function resetUploadUi() {
   document.getElementById("cancelUpload").style.display = "none";
   dropZone.classList.remove("busy");
   dropZone.querySelector(".drop-title").textContent = "Drop a file";
-  dropZone.querySelector(".drop-sub").textContent = ".epub · .txt · .xgf2 fonts · firmware .bin";
+  dropZone.querySelector(".drop-sub").textContent = ".epub · .txt · .ttf fonts · firmware .bin";
   document.getElementById("fileInput").value = "";
 }
 
@@ -409,7 +409,7 @@ function loadFonts() {
       if (!items.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No fonts yet — drop a .xgf2 file";
+        empty.textContent = "No fonts yet — drop a .ttf file";
         list.appendChild(empty);
         return;
       }

@@ -69,7 +69,7 @@ void HomeScreen::loop() {
     const bool hasContinue = itemCount == 4;
     // Item order: [Continue?], Browse, File Transfer, Settings.
     int i = index - (hasContinue ? 1 : 0);
-    // Drop the UI face before pushing a screen that may load the same .xgf2
+    // Drop the UI face before pushing a screen that may load the same font.
     // (reader, browser) or needs the heap (Wi-Fi).
     cjk.close();
     bool ok = true;

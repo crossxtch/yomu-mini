@@ -9,8 +9,8 @@ description: "Layering and abstraction discipline for the firmware. Use when tou
 
 - **SD card I/O:** `Storage` (`HalStorage`) and `HalFile`. Never `SdFat`,
   `FsFile`, or `SDCardManager` from `src/` or from `lib/Typesetter`. The HAL
-  serializes every SD access through one mutex; bypassing it races the SPI
-  state machine and panics FreeRTOS. `lib/SDCardManager` is the vendored place
+  serializes every SD access through one mutex; bypassing it races the card
+  and panics FreeRTOS. `lib/SDCardManager` is the vendored place
   those types live. `lib/EInkDisplay` is the same kind of vendor drop: patch it
   for a panel bug, and do not edit the `freeink-sdk` submodule.
 - **Display:** draw through `Gfx`. Refresh modes go through `HalDisplay`.
@@ -21,7 +21,7 @@ description: "Layering and abstraction discipline for the firmware. Use when tou
   because they are the physical button, not a remapped reading action.
 - **Rendering:** `Gfx` and `gfx.width()` / `gfx.height()`. UI text uses
   `FONT_UI` and `FONT_UI_BOLD` from `fontIds.h`. The logical page is portrait
-  (X3 528×792, X4 480×800); the panel buffer is landscape.
+  (X4 Classic 480×800); the panel buffer is landscape 800×480.
 - **Shared objects:** `settings`, `Storage`, `screenManager`, `gpio`,
   `display`, `powerManager`, `halClock`, `halTiltSensor`, `wifiManager`,
   `wifiCredentials`. Pass a dependency only when a free function cannot see
@@ -31,7 +31,7 @@ description: "Layering and abstraction discipline for the firmware. Use when tou
 
 Every string a reader sees is a `uiText::` name from `src/core/UiText.h`.
 Add a row to `UI_STRINGS`. The copy is Japanese; Latin stays only where the
-string already needs it (Wi-Fi, `.bin`, `.xgf2`). CJK has to fit the firmware
+string already needs it (Wi-Fi, `.bin`, `.ttf`). CJK has to fit the firmware
 `jp_12` face. Log lines (`LOG_*`) stay hardcoded English.
 
 ## Drawing a new boundary

@@ -88,8 +88,8 @@ bool parseU64(const char* s, uint64_t& out) {
   return true;
 }
 
-// The macOS save panel appends ".xgf2" again when the suggested name already
-// ends in it, so "Face-x3.xgf2" arrives as "Face-x3.xgf2.xgf2".
+// The macOS save panel appends ".ttf" again when the suggested name already
+// ends in it, so "Face.ttf" arrives as "Face.ttf.ttf".
 bool tailHasEocd(const uint8_t* tail, const uint32_t n) {
   if (n < 22) {
     return false;
@@ -124,19 +124,10 @@ bool resolveUploadDest(const char* dir, const char* name, std::string& dest) {
   if (!name || name[0] == '\0' || strchr(name, '/') || strchr(name, '\\')) {
     return false;
   }
-  const char* ext = strrchr(name, '.');
-  if (ext && strcasecmp(ext, ".xgf2") == 0) {
-    const char* fontName = name;
-    char trimmed[ReadingFont::kMaxFileName + 8];
-    const size_t n = strlen(name);
-    if (endsWithIgnoreCase(name, n, ".xgf2.xgf2") && n - 5 < sizeof(trimmed)) {
-      memcpy(trimmed, name, n - 5);
-      trimmed[n - 5] = '\0';
-      fontName = trimmed;
-    }
+  if (ReadingFont::isFontFilename(name)) {
     ReadingFont::migrate();
     char fileName[ReadingFont::kMaxFileName + 1];
-    if (!ReadingFont::copyFilename(fileName, sizeof(fileName), fontName)) {
+    if (!ReadingFont::copyFilename(fileName, sizeof(fileName), name)) {
       return false;
     }
     char path[192];

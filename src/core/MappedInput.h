@@ -6,7 +6,7 @@
 
 class MappedInput {
  public:
-  // PageBack/PageForward are the page keys (X3 side buttons / X4 rocker).
+  // PageBack/PageForward are the side keys (left = back, right = forward).
   enum class Button : uint8_t { Back, Confirm, Left, Right, Up, Down, Power, PageBack, PageForward };
 
   explicit MappedInput(HalGPIO& gpio) : gpio(gpio) {}
@@ -31,8 +31,7 @@ class MappedInput {
 
   // Net list/page delta from this frame's release edges plus taps drained during a blocking refresh.
   int consumeNavigationDelta();
-  // Reader paging. X3: both side buttons go forward; front Left is back.
-  // X4: Down/Right forward, Up/Left back. The power button no longer pages
+  // Reader paging. Down/Right forward, Up/Left back. The power button no longer pages
   // (short press now toggles the gyroscope lock; see core/Power.h).
   int consumeReaderPageDelta();
 

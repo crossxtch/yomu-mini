@@ -5,7 +5,6 @@
 #include <PowerManager.h>
 #include <WiFi.h>
 #include <esp_sleep.h>
-#include <soc/soc_caps.h>
 
 #include <cassert>
 
@@ -16,11 +15,6 @@
 #endif
 
 HalPowerManager powerManager;  // Singleton instance
-
-// GPIO13 controls the X4 battery latch and the X3 SD power rail on the C3
-// Xteink boards. Other boards use it for unrelated signals, including the
-// X4 Pro display chip select.
-static constexpr gpio_num_t XTEINK_C3_GPIO13 = GPIO_NUM_13;
 
 void HalPowerManager::begin() {
   if (BoardConfig::ACTIVE.batteryAdc >= 0) {
@@ -75,27 +69,12 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   logSerial.end();
 #endif
 
-#if !SOC_PM_SUPPORT_EXT1_WAKEUP
-  if (gpio.isXteinkDevice()) {
-    // GPIO13 gates the battery MOSFET on both Xteink C3 boards; driving it low
-    // is the battery power-off (the SDK wake source still handles USB power).
-    // Release any surviving pad hold first: hold_en survives deep sleep via
-    // the SDK's deepSleep() (esp_sleep_config_gpio_isolate +
-    // gpio_deep_sleep_hold_en), and a held pad silently ignores the drive.
-    gpio_hold_dis(XTEINK_C3_GPIO13);
-    gpio_set_direction(XTEINK_C3_GPIO13, GPIO_MODE_OUTPUT);
-    gpio_set_level(XTEINK_C3_GPIO13, 0);
-    gpio_hold_en(XTEINK_C3_GPIO13);
-  }
-#endif
+  (void)gpio;
 
-  // Cut the gated peripheral rails (touch/SD/EPD on boards like the Sticky) and
-  // hold the enables off through deep sleep — otherwise the GT911 and SD card
-  // stay powered all through "off" and drain the battery. No-op on boards with
-  // no switched rails (X4/X3). Trade-off: no touch-to-wake; wake is the power
-  // button. Must run after display.deepSleep() so the panel controller gets its
-  // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
-  // guarantees that ordering).
+  // Hold switched rails off through deep sleep. On the X4 Classic that is the
+  // SD card's active-low GPIO6. The panel's master rail (GPIO1) stays with
+  // PowerManager's wake path. Must run after display.deepSleep() so the
+  // controller gets its sleep command while its rail is still up.
   freeink::PowerManager::powerDownRailsForSleep();
 
 #if FREEINK_DEVICE_PAPERMONO

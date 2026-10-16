@@ -15,10 +15,10 @@
 #include <WiFi.h>
 #include <builtinFonts/all.h>
 
-#include "core/ScreenManager.h"
 #include "core/MappedInput.h"
 #include "core/Power.h"
 #include "core/ReadingFont.h"
+#include "core/ScreenManager.h"
 #include "core/Settings.h"
 #include "core/UiText.h"
 #include "core/fontIds.h"
@@ -28,10 +28,9 @@
 #define CROSSJP_VERSION "dev"
 #endif
 
-// EPUB inflate flushes each block straight into an SD write. On the default
-// 8 KB loopTask that path dies with the stack canary (puff dynamic tables +
-// FatFile::write + SPI). The Huffman tables are static; this is the rest.
-SET_LOOP_TASK_STACK_SIZE(12 * 1024);
+// FreeType face open and the scan converter share this task with EPUB inflate.
+// 8 KB overflows inside FT_Open_Face. 24 KB covers that plus the SD write path.
+SET_LOOP_TASK_STACK_SIZE(24 * 1024);
 
 Gfx gfx(display);
 MappedInput mappedInput(gpio);
@@ -99,9 +98,9 @@ void setup() {
   halClock.begin();
 
   const auto wakeupReason = gpio.getWakeupReason();
-  LOG_INF("MAIN", "crossjp " CROSSJP_VERSION " board=%s gpio=%s wake=%s bat=%u%% panic=%d",
-          BoardConfig::ACTIVE.name, gpio.deviceIsX3() ? "x3" : "x4", wakeupName(wakeupReason),
-          static_cast<unsigned>(powerManager.getBatteryPercentage()), HalSystem::isRebootFromPanic() ? 1 : 0);
+  LOG_INF("MAIN", "crossjp " CROSSJP_VERSION " board=%s wake=%s bat=%u%% panic=%d", BoardConfig::ACTIVE.name,
+          wakeupName(wakeupReason), static_cast<unsigned>(powerManager.getBatteryPercentage()),
+          HalSystem::isRebootFromPanic() ? 1 : 0);
 
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD init failed");
@@ -132,9 +131,10 @@ void setup() {
           gpio.update();
           delay(10);
         }
-        if (gpio.isPressed(HalGPIO::BTN_UP)) {
+        // Side-left is GPIO0, an ESP32-S3 strap. Recovery is the side-right key.
+        if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
           recoveryFirmware = true;
-          LOG_INF("MAIN", "Recovery firmware mode (UP + POWER)");
+          LOG_INF("MAIN", "Recovery firmware mode (DOWN + POWER)");
         }
       }
       break;

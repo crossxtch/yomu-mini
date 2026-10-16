@@ -9,7 +9,7 @@ These are written for capable agents, not beginners. They are principle- and
 decision-focused on purpose. They deliberately avoid line-number citations,
 which drift; they anchor on durable names (APIs, types, macros, files).
 
-crossjp is the on-device EPUB and plain-text reader for the Xteink X3 and X4.
+crossjp is the on-device EPUB and plain-text reader for the Xteink X4 Classic.
 `src/screens/` is the UI, `src/core/` is the screen stack and settings,
 `src/network/` is Wi-Fi and file transfer, `lib/hal/` wraps the board,
 `lib/Typesetter/` lays out a book, and `lib/Gfx/` is the portrait framebuffer.

@@ -4,15 +4,13 @@
 
 #include <cstddef>
 
-// Installed .xgf2 faces under /.crossjp/fonts/. One is selected in Settings
-// and used for UI CJK and .txt/.epub. Only that file is loaded in RAM.
+// Installed TrueType faces (.ttf .otf .ttc) under /.crossjp/fonts/. One is
+// selected in Settings and rasterized on device for reading and UI CJK.
 namespace ReadingFont {
 
 constexpr const char* kDir = "/.crossjp/fonts";
-constexpr const char* kLegacyPath = XgfFont::kDefaultPath;
 constexpr size_t kMaxFileName = 79;
 
-// Move a leftover /.crossjp/reading.xgf2 into kDir.
 void migrate();
 
 bool isFontFilename(const char* name);

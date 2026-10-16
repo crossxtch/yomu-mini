@@ -5,8 +5,8 @@ description: "Feature-scope discipline for the crossjp e-reader. Use when adding
 
 # Scope Discipline
 
-The mission: typeset an EPUB or a UTF-8 text file on the Xteink X3 or X4.
-One firmware binary per panel. The UI is Japanese.
+The mission: typeset an EPUB or a UTF-8 text file on the Xteink X4 Classic.
+One firmware binary. The UI is Japanese. Reading faces are TrueType, rasterized on device.
 
 ## The gate
 
@@ -45,7 +45,7 @@ otherwise pick a fixed default.
 
 ## Self-review
 
-- [ ] Stays inside EPUB / UTF-8 text on X3 and X4.
+- [ ] Stays inside EPUB / UTF-8 text on the X4 Classic.
 - [ ] Stated the concrete reading benefit.
 - [ ] Named the RAM cost and why the benefit wins.
 - [ ] Checked whether an existing screen or setting already covers it.

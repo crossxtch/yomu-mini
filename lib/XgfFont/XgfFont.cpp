@@ -1,16 +1,34 @@
 #include "XgfFont.h"
 
 #include <EpdFontFamily.h>
+#include <FontAlloc.h>
 #include <Gfx.h>
 #include <Logging.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 
 namespace {
+
+constexpr uint32_t kResidentMax = 6 * 1024 * 1024;
+constexpr uint32_t kStreamPrefix = 1024 * 1024;
+constexpr uint32_t kInkThreshold = 1;
+constexpr uint16_t kMaxCached = 4096;
+
+uint8_t quantize(const uint8_t coverage) {
+  // Same bins as the Mac XGF encoder: 255 is solid ink.
+  if (coverage >= 192) return 3;
+  if (coverage >= 128) return 2;
+  if (coverage >= 64) return 1;
+  return 0;
+}
+
+uint16_t slotStride(const uint8_t em) {
+  const unsigned rowBytes = (static_cast<unsigned>(em) + 3u) / 4u;
+  return static_cast<uint16_t>(rowBytes * em);
+}
 
 uint8_t pixelAt(const uint8_t* slot, const uint8_t em, const int x, const int y) {
   if (x < 0 || y < 0 || x >= em || y >= em) {
@@ -22,18 +40,20 @@ uint8_t pixelAt(const uint8_t* slot, const uint8_t em, const int x, const int y)
   return static_cast<uint8_t>((b >> shift) & 3u);
 }
 
-// 0 paper, 1 light, 2 dark, 3 black. Ink is every non-paper pixel, so the
-// base frame is the full stroke. The UC8253 `_gc` nudge drives a marked
-// gray pixel (BW 0x80 / WW 0x20) instead of holding the black the base
-// just set. On a reading face those marks are the stem, not a photo gray,
-// and the drive turns characters into blocks. Leave both gray planes
-// unmarked so every glyph pixel holds. Picture pages use their own map.
-bool planeKeep(const uint8_t v, const XgfFont::Plane plane) {
-  return plane == XgfFont::Plane::Ink && v >= xgf::kInkThreshold;
+void putPixel(uint8_t* slot, const uint8_t em, const int x, const int y, const uint8_t v) {
+  const unsigned rowBytes = (static_cast<unsigned>(em) + 3u) / 4u;
+  uint8_t& b = slot[static_cast<unsigned>(y) * rowBytes + static_cast<unsigned>(x) / 4u];
+  const unsigned shift = 6u - (static_cast<unsigned>(x) % 4u) * 2u;
+  b = static_cast<uint8_t>((b & ~(3u << shift)) | ((v & 3u) << shift));
 }
 
-// Paint `nBits` MSB-first bits from `src` into a panel row at pixel `x`.
-// `black` clears those bits. Otherwise it sets them (white on a gray plane).
+// 0 paper, 1 light, 2 dark, 3 black. Ink is every non-paper pixel. Gray planes
+// stay clear: a marked gray pixel is driven instead of holding the black the
+// base frame just painted, and on a reading face those pixels are the stem.
+bool planeKeep(const uint8_t v, const XgfFont::Plane plane) {
+  return plane == XgfFont::Plane::Ink && v >= kInkThreshold;
+}
+
 void paintRowBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, int nBits, const bool black) {
   int s = 0;
   if (x < 0) {
@@ -86,41 +106,100 @@ void fillRowMask(uint8_t* mask, const uint8_t* src, const uint8_t em, const int 
   }
 }
 
+void* cacheAlloc(const size_t bytes) {
+  void* p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!p) {
+    p = heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
+  }
+  return p;
+}
+
+uint16_t capFor(const uint32_t budget, const uint16_t stride) {
+  if (stride == 0 || budget < stride) {
+    return 0;
+  }
+  uint32_t cap = budget / stride;
+  if (cap > kMaxCached) {
+    cap = kMaxCached;
+  }
+  return static_cast<uint16_t>(cap);
+}
+
 }  // namespace
+
+unsigned long XgfFont::streamRead(void* ctx, const unsigned long offset, unsigned char* buffer,
+                                  const unsigned long count) {
+  auto* self = static_cast<XgfFont*>(ctx);
+  if (count == 0) {
+    return 0;
+  }
+  unsigned long done = 0;
+  if (offset < self->prefixBytes && self->fileBytes) {
+    const unsigned long fromCache = (offset + count <= self->prefixBytes) ? count : self->prefixBytes - offset;
+    memcpy(buffer, self->fileBytes + offset, fromCache);
+    done = fromCache;
+    if (done == count) {
+      return count;
+    }
+  }
+  const unsigned long fileOff = offset + done;
+  const unsigned long tSd = micros();
+  const bool sought = self->file.seekSet(fileOff);
+  const int n = sought ? self->file.read(buffer + done, count - done) : 0;
+  self->statSdUs += static_cast<uint32_t>(micros() - tSd);
+  ++self->statSdReads;
+  if (n > 0) {
+    self->statSdBytes += static_cast<uint32_t>(n);
+    done += static_cast<unsigned long>(n);
+  }
+  return done;
+}
 
 bool XgfFont::load(const char* path, const uint32_t lruMaxBytes, const bool wantRubyMap) {
   close();
   lruLimit = lruMaxBytes ? lruMaxBytes : kLruBytes;
   wantRuby = wantRubyMap;
+  emPx_ = kEmPx;
+  rubyEmPx_ = kRubyEmPx;
   if (!path || path[0] == '\0') {
     error = "no font path";
     return false;
   }
   snprintf(filepath, sizeof(filepath), "%s", path);
-  if (!Storage.openFileForRead("XGF", filepath, file)) {
+  if (!Storage.openFileForRead("FONT", filepath, file)) {
     error = "font missing";
-    LOG_ERR("XGF", "open %s failed", filepath);
+    LOG_ERR("FONT", "open %s failed", filepath);
     return false;
   }
-  file.probeContiguous();
-  if (!readHeader() || !loadTables()) {
+  fileSize = static_cast<uint32_t>(file.fileSize());
+  if (fileSize < 16) {
+    error = "font tiny";
+    close();
+    return false;
+  }
+  if (!loadBytes() || !initFaces()) {
     close();
     return false;
   }
   opened = true;
   error = "";
-  LOG_INF("XGF", "Loaded %s em=%u ruby=%u body=%u rubySlots=%u iv=%u (lru later)", filepath, header.emPx,
-          header.rubyEmPx, header.bodyCount, header.rubyCount, header.intervalCount);
+  LOG_INF("FONT", "Loaded %s %s %u KB em=%u ruby=%u", filepath, streamed ? "stream" : "resident",
+          static_cast<unsigned>(fileSize / 1024), emPx_, rubyEmPx_);
   return true;
 }
 
 void XgfFont::close() {
   opened = false;
+  freeFaces();
+  freeBytes();
   releaseFile();
-  freeTables();
   freeLru();
-  header = {};
+  fileSize = 0;
+  prefixBytes = 0;
+  streamed = false;
   filepath[0] = '\0';
+  statHit = statMiss = statFf = statBlocked = 0;
+  statSdReads = statSdBytes = statSdUs = 0;
 }
 
 void XgfFont::releaseFile() {
@@ -130,6 +209,9 @@ void XgfFont::releaseFile() {
 }
 
 bool XgfFont::reopenFile() {
+  if (!streamed) {
+    return fileBytes != nullptr;
+  }
   if (file.isOpen()) {
     return true;
   }
@@ -137,146 +219,141 @@ bool XgfFont::reopenFile() {
     error = "font missing";
     return false;
   }
-  if (!Storage.openFileForRead("XGF", filepath, file)) {
+  if (!Storage.openFileForRead("FONT", filepath, file)) {
     error = "font missing";
     return false;
   }
-  file.probeContiguous();
   return true;
 }
 
-bool XgfFont::readHeader() {
-  if (!file.seekSet(0)) {
-    error = "font seek";
-    return false;
+bool XgfFont::loadBytes() {
+  const size_t spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+  streamed = fileSize > kResidentMax || spiram < static_cast<size_t>(fileSize) + 256 * 1024;
+  if (!streamed) {
+    fileBytes = static_cast<uint8_t*>(fiFontMalloc(fileSize));
+    if (!fileBytes) {
+      streamed = true;
+    } else if (!file.seekSet(0) || file.read(fileBytes, fileSize) != static_cast<int>(fileSize)) {
+      error = "font read";
+      return false;
+    } else {
+      prefixBytes = fileSize;
+      releaseFile();
+      return true;
+    }
   }
-  if (file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header))) {
-    error = "font header";
-    return false;
+  prefixBytes = fileSize < kStreamPrefix ? fileSize : kStreamPrefix;
+  if (spiram < static_cast<size_t>(prefixBytes) + 256 * 1024) {
+    prefixBytes = 0;
+    return true;
   }
-  if (header.magic != xgf::kMagic) {
-    error = "bad font magic";
-    return false;
+  fileBytes = static_cast<uint8_t*>(fiFontMalloc(prefixBytes));
+  if (!fileBytes) {
+    prefixBytes = 0;
+    return true;
   }
-  if (header.version != xgf::kVersion) {
-    error = "font version";
-    return false;
+  if (!file.seekSet(0) || file.read(fileBytes, prefixBytes) != static_cast<int>(prefixBytes)) {
+    fiFontFree(fileBytes);
+    fileBytes = nullptr;
+    prefixBytes = 0;
+  } else {
+    LOG_INF("FONT", "Cached %u KB font prefix", static_cast<unsigned>(prefixBytes / 1024));
   }
-  if (header.bpp != 2 || header.emPx < 4 || header.emPx > 64) {
-    error = "font geometry";
-    return false;
-  }
-  if (header.bodyStride != xgf::slotStride(header.emPx)) {
-    error = "body stride";
-    return false;
-  }
-  if (header.rubyEmPx > 0 && header.rubyStride != xgf::slotStride(header.rubyEmPx)) {
-    error = "ruby stride";
-    return false;
-  }
-  if (header.intervalCount == 0 || header.intervalCount > xgf::kMaxIntervals || header.bodyCount == 0 ||
-      header.bodyCount > xgf::kMaxGlyphs) {
-    LOG_ERR("XGF", "counts body=%u iv=%u ruby=%u (max glyphs=%u iv=%u)", header.bodyCount, header.intervalCount,
-            header.rubyCount, xgf::kMaxGlyphs, xgf::kMaxIntervals);
-    error = "font counts";
-    return false;
-  }
-  LOG_INF("XGF", "header em=%u rubyEm=%u body=%u iv=%u ruby=%u stride=%u", header.emPx, header.rubyEmPx,
-          header.bodyCount, header.intervalCount, header.rubyCount, header.bodyStride);
   return true;
 }
 
-bool XgfFont::loadTables() {
-  intervals = static_cast<xgf::Interval*>(malloc(sizeof(xgf::Interval) * header.intervalCount));
-  if (!intervals) {
-    error = "cmap oom";
-    return false;
-  }
-  if (!file.seekSet(header.intervalsOff)) {
-    error = "cmap seek";
-    return false;
-  }
-  const size_t ivBytes = sizeof(xgf::Interval) * header.intervalCount;
-  if (file.read(intervals, ivBytes) != static_cast<int>(ivBytes)) {
-    error = "cmap read";
-    return false;
-  }
-  uint32_t covered = 0;
-  for (uint16_t i = 0; i < header.intervalCount; ++i) {
-    const xgf::Interval& iv = intervals[i];
-    if (iv.first > iv.last || (i > 0 && iv.first <= intervals[i - 1].last)) {
-      error = "cmap order";
-      return false;
-    }
-    const uint32_t span = static_cast<uint32_t>(iv.last - iv.first) + 1;
-    if (static_cast<uint32_t>(iv.glyphId) + span > header.bodyCount) {
-      error = "cmap ids";
-      return false;
-    }
-    covered += span;
-  }
-  if (covered != header.bodyCount) {
-    error = "cmap coverage";
-    return false;
-  }
+void XgfFont::freeBytes() {
+  fiFontFree(fileBytes);
+  fileBytes = nullptr;
+  prefixBytes = 0;
+}
 
-  if (wantRuby && header.rubyCount > 0) {
-    rubyMap = static_cast<uint16_t*>(malloc(sizeof(uint16_t) * header.rubyCount));
-    if (!rubyMap) {
-      error = "ruby map oom";
+bool XgfFont::initFaces() {
+  freeink::font::FtFont::RenderOptions options;
+  options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  options.stemDarkening = true;
+  auto openFace = [&](freeink::font::FtFont& face, const uint16_t px) {
+    const bool ok =
+        streamed ? face.initStream(&XgfFont::streamRead, this, fileSize, px) : face.init(fileBytes, fileSize, px);
+    if (!ok) {
       return false;
     }
-    if (!file.seekSet(header.rubyMapOff)) {
-      error = "ruby map seek";
-      return false;
-    }
-    const size_t rb = sizeof(uint16_t) * header.rubyCount;
-    if (file.read(rubyMap, rb) != static_cast<int>(rb)) {
-      error = "ruby map read";
-      return false;
-    }
+    face.setRenderOptions(options);
+    face.setGposByteBudget(0);
+    face.setGsubByteBudget(0);
+    return true;
+  };
+  if (!openFace(bodyFace, emPx_)) {
+    error = "font parse";
+    LOG_ERR("FONT", "FreeType open failed (%s, init %d err %d)", filepath, static_cast<int>(bodyFace.lastInitFailure()),
+            bodyFace.lastInitError());
+    return false;
   }
-  buildHi();
+  if (wantRuby && !openFace(rubyFace, rubyEmPx_)) {
+    error = "ruby face";
+    LOG_ERR("FONT", "Ruby face failed err %d", rubyFace.lastInitError());
+    freeFaces();
+    return false;
+  }
+  facesReady = true;
   return true;
 }
 
-void XgfFont::buildHi() {
-  memset(hi, 0, sizeof(hi));
-  for (uint16_t i = 0; i < header.intervalCount; ++i) {
-    const uint16_t b0 = static_cast<uint16_t>(intervals[i].first >> 8);
-    const uint16_t b1 = static_cast<uint16_t>(intervals[i].last >> 8);
-    for (uint16_t b = b0; b <= b1; ++b) {
-      if (hi[b].count == 0) {
-        hi[b].begin = i;
-      }
-      hi[b].count = static_cast<uint16_t>(i - hi[b].begin + 1);
-    }
+void XgfFont::freeFaces() {
+  bodyFace.deinit();
+  rubyFace.deinit();
+  facesReady = false;
+}
+
+void XgfFont::releaseMaps() { freeFaces(); }
+
+bool XgfFont::restoreMaps() {
+  if (facesReady) {
+    return true;
   }
+  if (!opened) {
+    error = "not loaded";
+    return false;
+  }
+  return initFaces();
 }
 
-void XgfFont::freeTables() {
-  free(intervals);
-  intervals = nullptr;
-  free(rubyMap);
-  rubyMap = nullptr;
+void XgfFont::freeLru() {
+  freeTable(bodyLru);
+  freeTable(rubyLru);
 }
 
-void XgfFont::releaseMaps() { freeTables(); }
+uint16_t XgfFont::glyphId(const uint32_t cp) const {
+  if (!facesReady || cp == 0) {
+    return 0xFFFF;
+  }
+  const auto id = bodyFace.glyphId(cp);
+  if (id == 0 || id >= 0xFFFF) {
+    return 0xFFFF;
+  }
+  return static_cast<uint16_t>(id);
+}
 
-bool XgfFont::restoreMaps() { return loadTables(); }
+uint16_t XgfFont::rubySlot(const uint16_t bodyId) const {
+  if (!wantRuby || !facesReady || bodyId == 0xFFFF) {
+    return 0xFFFF;
+  }
+  return bodyId;
+}
 
 bool XgfFont::allocTable(Lru& t, const uint16_t cap, const uint16_t stride) {
   if (cap == 0 || stride == 0) {
     return false;
   }
-  t.pixels = static_cast<uint8_t*>(malloc(static_cast<size_t>(cap) * stride));
-  t.entries = static_cast<LruEntry*>(malloc(sizeof(LruEntry) * cap));
+  t.pixels = static_cast<uint8_t*>(cacheAlloc(static_cast<size_t>(cap) * stride));
+  t.entries = static_cast<LruEntry*>(cacheAlloc(sizeof(LruEntry) * cap));
   if (!t.pixels || !t.entries) {
     freeTable(t);
     return false;
   }
+  memset(t.entries, 0, sizeof(LruEntry) * cap);
   for (uint16_t i = 0; i < cap; ++i) {
-    t.entries[i] = LruEntry{};
+    t.entries[i].id = 0xFFFF;
   }
   t.cap = cap;
   t.used = 0;
@@ -286,9 +363,9 @@ bool XgfFont::allocTable(Lru& t, const uint16_t cap, const uint16_t stride) {
 }
 
 void XgfFont::freeTable(Lru& t) {
-  free(t.pixels);
+  heap_caps_free(t.pixels);
+  heap_caps_free(t.entries);
   t.pixels = nullptr;
-  free(t.entries);
   t.entries = nullptr;
   t.cap = 0;
   t.used = 0;
@@ -300,138 +377,66 @@ bool XgfFont::allocLru() {
   if (bodyLru.pixels) {
     return true;
   }
-  if (wantRuby && header.rubyStride > 0 && header.rubyCount > 0) {
-    uint16_t cap = static_cast<uint16_t>(kRubyLruBytes / header.rubyStride);
-    if (cap > header.rubyCount) {
-      cap = header.rubyCount;
+  const uint16_t bodyStride = slotStride(emPx_);
+  const uint16_t rubyStride = slotStride(rubyEmPx_);
+  if (wantRuby) {
+    uint32_t rubyBudget = kRubyLruBytes;
+    if (rubyBudget > lruLimit) {
+      rubyBudget = lruLimit / 4;
     }
-    if (cap == 0) {
-      cap = 1;
-    }
-    if (!allocTable(rubyLru, cap, header.rubyStride) && !allocTable(rubyLru, 1, header.rubyStride)) {
-      LOG_ERR("XGF", "ruby lru oom stride=%u", header.rubyStride);
+    const uint16_t cap = capFor(rubyBudget, rubyStride);
+    if (cap == 0 || !allocTable(rubyLru, cap, rubyStride)) {
+      LOG_ERR("FONT", "ruby cache oom stride=%u", rubyStride);
     }
   }
-
-  const uint16_t bodyStride = header.bodyStride;
-  if (bodyStride == 0) {
-    error = "stride";
-    return false;
-  }
-  const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  const size_t slack = 12 * 1024;
-  size_t budget = largest > slack ? largest - slack : 0;
-  if (budget > lruLimit) {
-    budget = lruLimit;
-  }
-  uint16_t cap = static_cast<uint16_t>(budget / bodyStride);
-  if (cap == 0 && largest >= static_cast<size_t>(bodyStride) + 2048) {
-    cap = 1;
-  }
+  const uint16_t cap = capFor(lruLimit, bodyStride);
   if (cap == 0 || !allocTable(bodyLru, cap, bodyStride)) {
-    LOG_ERR("XGF", "body lru oom cap=%u stride=%u largest=%u", cap, bodyStride, static_cast<unsigned>(largest));
+    LOG_ERR("FONT", "body cache oom cap=%u stride=%u", cap, bodyStride);
     error = "lru oom";
     freeLru();
     return false;
   }
-  if (cap < 8) {
-    LOG_INF("XGF", "body lru small cap=%u stride=%u largest=%u", cap, bodyStride, static_cast<unsigned>(largest));
-  }
-  LOG_INF("XGF", "LRU body %u x %u (%u bytes) ruby %u x %u (%u bytes)", bodyLru.cap, bodyLru.stride,
-          static_cast<unsigned>(bodyLru.cap * bodyLru.stride), rubyLru.cap, rubyLru.stride,
-          static_cast<unsigned>(rubyLru.cap * rubyLru.stride));
+  LOG_INF("FONT", "Cache body %u x %u ruby %u x %u", bodyLru.cap, bodyLru.stride, rubyLru.cap, rubyLru.stride);
   return true;
 }
 
-void XgfFont::freeLru() {
-  freeTable(bodyLru);
-  freeTable(rubyLru);
-}
-
-uint16_t XgfFont::glyphId(const uint32_t cp) const {
-  if (!intervals || cp > 0xFFFF) {
-    return 0xFFFF;
-  }
-  const uint16_t b = static_cast<uint16_t>(cp >> 8);
-  const uint16_t begin = hi[b].begin;
-  const uint16_t n = hi[b].count;
-  if (n == 0) {
-    return 0xFFFF;
-  }
-  uint16_t lo = begin;
-  uint16_t hiIx = static_cast<uint16_t>(begin + n);
-  while (lo < hiIx) {
-    const uint16_t mid = static_cast<uint16_t>(lo + (hiIx - lo) / 2);
-    const xgf::Interval& iv = intervals[mid];
-    if (cp < iv.first) {
-      hiIx = mid;
-    } else if (cp > iv.last) {
-      lo = static_cast<uint16_t>(mid + 1);
-    } else {
-      return static_cast<uint16_t>(iv.glyphId + (cp - iv.first));
-    }
-  }
-  return 0xFFFF;
-}
-
-uint16_t XgfFont::rubySlot(const uint16_t bodyId) const {
-  if (!rubyMap || header.rubyCount == 0) {
-    return 0xFFFF;
-  }
-  uint16_t lo = 0;
-  uint16_t hiIx = header.rubyCount;
-  while (lo < hiIx) {
-    const uint16_t mid = static_cast<uint16_t>(lo + (hiIx - lo) / 2);
-    if (rubyMap[mid] < bodyId) {
-      lo = static_cast<uint16_t>(mid + 1);
-    } else {
-      hiIx = mid;
-    }
-  }
-  if (lo < header.rubyCount && rubyMap[lo] == bodyId) {
-    return lo;
-  }
-  return 0xFFFF;
-}
-
-bool XgfFont::readSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest) {
-  uint32_t off = 0;
-  uint16_t stride = 0;
-  if (ruby) {
-    const uint16_t slot = rubySlot(bodyId);
-    if (slot == 0xFFFF) {
-      return false;
-    }
-    stride = header.rubyStride;
-    off = header.rubyBitsOff + static_cast<uint32_t>(slot) * stride;
-  } else {
-    if (bodyId >= header.bodyCount) {
-      return false;
-    }
-    stride = header.bodyStride;
-    off = header.bodyBitsOff + static_cast<uint32_t>(bodyId) * stride;
-  }
-  const unsigned long tSd = micros();
-  const bool sought = file.seekSet(off);
-  const int n = sought ? file.read(dest, stride) : 0;
-  statSdUs += static_cast<uint32_t>(micros() - tSd);
-  ++statSdReads;
-  if (n > 0) {
-    statSdBytes += static_cast<uint32_t>(n);
-  }
-  if (!sought || n != static_cast<int>(stride)) {
+bool XgfFont::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest) {
+  freeink::font::FtFont& face = ruby ? rubyFace : bodyFace;
+  const uint8_t em = ruby ? rubyEmPx_ : emPx_;
+  const uint16_t stride = slotStride(em);
+  memset(dest, 0, stride);
+  if (!facesReady || (ruby && !wantRuby)) {
     return false;
   }
-  for (uint16_t i = 0; i < stride; ++i) {
-    if (dest[i] != 0xFF) {
-      return true;
+  const freeink::font::GlyphBitmap* glyph = face.rasterizeGlyph26_6(bodyId, static_cast<uint32_t>(em) << 6);
+  if (!glyph) {
+    ++statFf;
+    LOG_ERR("FONT", "raster %u %s failed (%d)", bodyId, ruby ? "ruby" : "body", face.lastGlyphError());
+    return false;
+  }
+  if (!glyph->pixels || glyph->width == 0 || glyph->height == 0) {
+    return true;
+  }
+  const int ox = (static_cast<int>(em) - static_cast<int>(glyph->width)) / 2;
+  const int oy = (static_cast<int>(em) - static_cast<int>(glyph->height)) / 2;
+  for (int sy = 0; sy < static_cast<int>(glyph->height); ++sy) {
+    const int dy = oy + sy;
+    if (dy < 0 || dy >= em) {
+      continue;
+    }
+    const uint8_t* row = glyph->pixels + static_cast<unsigned>(sy) * glyph->width;
+    for (int sx = 0; sx < static_cast<int>(glyph->width); ++sx) {
+      const int dx = ox + sx;
+      if (dx < 0 || dx >= em) {
+        continue;
+      }
+      const uint8_t v = quantize(row[sx]);
+      if (v != 0) {
+        putPixel(dest, em, dx, dy, v);
+      }
     }
   }
-  // Paper is 0x00. Every pixel 0xFF is MISO idle while the panel holds the
-  // bus, not a mincho slot (this face has none). Leave it uncached.
-  ++statFf;
-  LOG_ERR("XGF", "slot %u %s is 0xFF", bodyId, ruby ? "ruby" : "body");
-  return false;
+  return true;
 }
 
 bool XgfFont::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) const {
@@ -454,12 +459,12 @@ bool XgfFont::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) cons
     hash *= 16777619u;
   }
   out.hash = hash;
-  const uint8_t em = ruby ? header.rubyEmPx : header.emPx;
+  const uint8_t em = ruby ? rubyEmPx_ : emPx_;
   out.area = static_cast<uint16_t>(em * em);
   uint16_t ink = 0;
   for (int y = 0; y < em; ++y) {
     for (int x = 0; x < em; ++x) {
-      if (pixelAt(slot, em, x, y) >= xgf::kInkThreshold) {
+      if (pixelAt(slot, em, x, y) >= kInkThreshold) {
         ++ink;
       }
     }
@@ -507,7 +512,7 @@ const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) 
       victim = i;
     }
   }
-  if (!allowSdReads) {
+  if (!allowSdReads && streamed) {
     ++statBlocked;
     return nullptr;
   }
@@ -517,8 +522,11 @@ const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) 
     slot = t.used++;
   }
   uint8_t* dest = t.pixels + static_cast<size_t>(slot) * t.stride;
-  if (!readSlot(bodyId, ruby, dest)) {
+  if (!rasterizeSlot(bodyId, ruby, dest)) {
     t.entries[slot].id = 0xFFFF;
+    if (slot == t.used - 1 && t.used > 0) {
+      --t.used;
+    }
     return nullptr;
   }
   t.entries[slot].id = bodyId;
@@ -555,16 +563,6 @@ void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool 
       order[n++] = id;
     }
   }
-  // Insertion sort by glyph id so SD reads run forward.
-  for (uint16_t i = 1; i < n; ++i) {
-    const uint16_t v = order[i];
-    uint16_t j = i;
-    while (j > 0 && order[j - 1] > v) {
-      order[j] = order[j - 1];
-      --j;
-    }
-    order[j] = v;
-  }
   for (uint16_t i = 0; i < n; ++i) {
     if (ruby && rubySlot(order[i]) == 0xFFFF) {
       continue;
@@ -584,7 +582,7 @@ void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool 
     }
     (void)cacheSlot(order[i], ruby);
   }
-  LOG_INF("XGF", "prewarm %s n=%u hit=%u miss=%u %lums", ruby ? "ruby" : "body", n, hits, misses, millis() - t0);
+  LOG_INF("FONT", "prewarm %s n=%u hit=%u miss=%u %lums", ruby ? "ruby" : "body", n, hits, misses, millis() - t0);
 }
 
 bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const bool ruby, const bool rotate90,
@@ -593,7 +591,7 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
   if (!slot) {
     return false;
   }
-  const uint8_t em = ruby ? header.rubyEmPx : header.emPx;
+  const uint8_t em = ruby ? rubyEmPx_ : emPx_;
   if (em == 0) {
     return false;
   }
@@ -608,7 +606,6 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
 
   const bool black = plane == Plane::Ink;
   if (rotate90) {
-    // Source row gy is consecutive phyX on panel row phyY (90° CW).
     uint8_t mask[8];
     for (int gy = 0; gy < em; ++gy) {
       const int phyY = ph - x - em + gy;
@@ -621,7 +618,6 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
     return true;
   }
 
-  // Upright (ruby): source row is a panel column.
   for (int gy = 0; gy < em; ++gy) {
     const int phyX = y + gy;
     if (phyX < 0 || phyX >= pw) {
@@ -662,7 +658,7 @@ bool XgfFont::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId,
   if (!slot) {
     return false;
   }
-  const uint8_t em = header.emPx;
+  const uint8_t em = emPx_;
   if (em == 0) {
     return false;
   }
@@ -700,14 +696,14 @@ bool XgfFont::blitUi(Gfx& gfx, const int x, const int y, const uint16_t bodyId, 
   if (!slot) {
     return false;
   }
-  const uint8_t em = header.emPx;
+  const uint8_t em = emPx_;
   if (em == 0) {
     return false;
   }
   if (size == static_cast<int>(em)) {
     for (int gy = 0; gy < em; ++gy) {
       for (int gx = 0; gx < em; ++gx) {
-        if (pixelAt(slot, em, gx, gy) >= xgf::kInkThreshold) {
+        if (pixelAt(slot, em, gx, gy) >= kInkThreshold) {
           gfx.drawPixel(x + gx, y + gy, black);
         }
       }
@@ -723,7 +719,7 @@ bool XgfFont::blitUi(Gfx& gfx, const int x, const int y, const uint16_t bodyId, 
       bool ink = false;
       for (int sy = y0; sy < y1 && !ink; ++sy) {
         for (int sx = x0; sx < x1; ++sx) {
-          if (pixelAt(slot, em, sx, sy) >= xgf::kInkThreshold) {
+          if (pixelAt(slot, em, sx, sy) >= kInkThreshold) {
             ink = true;
             break;
           }
@@ -750,8 +746,8 @@ int XgfFont::drawUtf8(Gfx& gfx, const int fontId, const int x, const int y, cons
   const int lineH = family ? family->getData()->advanceY : 16;
   const int asc = family ? family->getData()->ascender : 12;
   int cell = asc > 0 ? asc : lineH;
-  if (header.emPx > 0 && header.emPx < cell) {
-    cell = header.emPx;
+  if (emPx_ > 0 && emPx_ < cell) {
+    cell = emPx_;
   }
   const int cjkY = y + (lineH - cell) / 2;
   int cursorX = x;

@@ -6,10 +6,9 @@
 #include <HalPowerManager.h>
 #include <HalTiltSensor.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <cstdio>
-
-#include <Memory.h>
 
 #include "core/BookCache.h"
 #include "core/Settings.h"
@@ -23,7 +22,7 @@
 #endif
 
 namespace {
-// Tilt page-turn is only offered on boards with the QMI8658 IMU (X3).
+// Tilt page-turn is offered when the QMI8658 IMU answers.
 bool hasTilt() { return halTiltSensor.isAvailable(); }
 constexpr int kSleep = 0;
 constexpr int kRefresh = 1;

@@ -1,21 +1,27 @@
 #pragma once
 
+#include <FtFont.h>
 #include <HalStorage.h>
 
 #include <cstdint>
 
-#include "XgfFormat.h"
-
 class Gfx;
 
+// Reading face. A TrueType file on the SD card is rasterized on device into
+// fixed 2-bit em boxes and cached in PSRAM. The typesetter still blits those
+// boxes one em at a time.
 class XgfFont {
  public:
   enum class Plane : uint8_t { Ink, Lsb, Msb };
 
-  static constexpr uint32_t kLruBytes = 80 * 1024;
-  static constexpr uint32_t kRubyLruBytes = 12 * 1024;
-  static constexpr uint32_t kUiLruBytes = 16 * 1024;
-  static constexpr const char* kDefaultPath = "/.crossjp/reading.xgf2";
+  // A 40 px 2-bit cell is 400 bytes. 1 MB holds about 2500 body glyphs.
+  static constexpr uint32_t kLruBytes = 1024 * 1024;
+  static constexpr uint32_t kRubyLruBytes = 256 * 1024;
+  static constexpr uint32_t kUiLruBytes = 128 * 1024;
+
+  // 13 pt at the X4 Classic's 219 PPI. Ruby is half an em, rounded up.
+  static constexpr uint8_t kEmPx = 40;
+  static constexpr uint8_t kRubyEmPx = 20;
 
   XgfFont() = default;
   ~XgfFont() { close(); }
@@ -26,35 +32,31 @@ class XgfFont {
   bool load(const char* path, uint32_t lruMaxBytes = kLruBytes, bool wantRuby = true);
   void close();
   bool loaded() const { return opened; }
-  // Drop/restore cmap so EPUB ingest can use the heap. File stays open.
+  // Drop/restore the FreeType faces so EPUB ingest can use the heap. The file
+  // bytes (or the stream handle) stay.
   void releaseMaps();
   bool restoreMaps();
-  // Close the SD handle without dropping cmap or the path. Ingest reopens it.
+  // Close the SD handle without dropping the face bytes or the path.
   void releaseFile();
   bool reopenFile();
 
-  uint8_t emPx() const { return header.emPx; }
-  uint8_t rubyEmPx() const { return header.rubyEmPx; }
-  uint16_t bodyCount() const { return header.bodyCount; }
+  uint8_t emPx() const { return emPx_; }
+  uint8_t rubyEmPx() const { return rubyEmPx_; }
   const char* lastError() const { return error; }
 
-  // Unicode → glyph id. 0xFFFF = missing.
+  // Unicode → FreeType glyph id. 0xFFFF = missing.
   uint16_t glyphId(uint32_t cp) const;
   bool hasGlyph(const uint32_t cp) const { return glyphId(cp) != 0xFFFF; }
 
-  // Ruby slot for a body glyph id, or 0xFFFF.
+  // Every body glyph can be drawn at ruby size. 0xFFFF when ruby is off.
   uint16_t rubySlot(uint16_t bodyId) const;
 
-  // Load misses in glyphId order (coalesced SD). ids are body ids; ruby=true
-  // fetches the ruby bitmap when present.
+  // Rasterize misses. ids are body glyph ids.
   void prewarm(const uint16_t* bodyIds, uint16_t count, bool ruby);
 
-  // When false, a cache miss stays a miss and does not touch the SD. The panel
-  // refresh shares SPI with the card; a read in that window comes back 0xFF
-  // and would be reused as a black square for that glyph.
+  // When false, a streamed-face miss stays a miss and does not touch the SD.
   void setSdReads(const bool allow) { allowSdReads = allow; }
 
-  // Cached bitmap only. No SD read. hash is FNV-1a of the slot bytes.
   struct SlotProbe {
     uint16_t ink = 0;
     uint16_t area = 0;
@@ -70,18 +72,18 @@ class XgfFont {
     uint16_t rubyCap = 0;
     uint32_t hits = 0;
     uint32_t misses = 0;
-    uint32_t rejected = 0;  // all-0xFF slot, not cached
-    uint32_t blocked = 0;   // miss while SD reads are suspended
+    uint32_t rejected = 0;
+    uint32_t blocked = 0;
     uint32_t sdReads = 0;
     uint32_t sdBytes = 0;
-    uint32_t sdUs = 0;  // seek + read, microseconds
+    uint32_t sdUs = 0;
   };
   CacheStats cacheStats() const;
 
   // Blit one em (or ruby) slot at logical top-left. rotate90 is 90° CW, y-down.
   bool blit(Gfx& gfx, int x, int y, uint16_t bodyId, bool ruby, bool rotate90, Plane plane);
 
-  // Scale a body glyph into a size×size box. Used for 縦中横. Honors the gray plane.
+  // Scale a body glyph into a size×size box. Used for 縦中横.
   bool blitBox(Gfx& gfx, int x, int y, uint16_t bodyId, int size, Plane plane);
 
   // 1-bit UI: Latin from Gfx fontId, other glyphs from this face, scaled to the
@@ -90,7 +92,7 @@ class XgfFont {
 
  private:
   struct LruEntry {
-    uint16_t id = 0xFFFF;  // 0xFFFF = empty
+    uint16_t id = 0xFFFF;
     uint16_t recency = 0;
   };
   struct Lru {
@@ -102,24 +104,27 @@ class XgfFont {
     uint16_t stride = 0;
   };
 
+  static unsigned long streamRead(void* ctx, unsigned long offset, unsigned char* buffer, unsigned long count);
+
   char filepath[256]{};
   const char* error = "not loaded";
   HalFile file;
-  xgf::Header header{};
+  uint8_t* fileBytes = nullptr;
+  uint32_t fileSize = 0;
+  uint32_t prefixBytes = 0;
+  bool streamed = false;
   bool opened = false;
+  bool facesReady = false;
+  bool wantRuby = true;
 
-  xgf::Interval* intervals = nullptr;
-  uint16_t* rubyMap = nullptr;  // bodyId per ruby slot, sorted
-  struct Hi {
-    uint16_t begin = 0;
-    uint16_t count = 0;
-  };
-  Hi hi[256]{};
+  freeink::font::FtFont bodyFace;
+  freeink::font::FtFont rubyFace;
+  uint8_t emPx_ = kEmPx;
+  uint8_t rubyEmPx_ = kRubyEmPx;
 
   Lru bodyLru;
   Lru rubyLru;
   uint32_t lruLimit = kLruBytes;
-  bool wantRuby = true;
   bool allowSdReads = true;
   uint32_t statHit = 0;
   uint32_t statMiss = 0;
@@ -129,16 +134,16 @@ class XgfFont {
   uint32_t statSdBytes = 0;
   uint32_t statSdUs = 0;
 
-  bool readHeader();
-  bool loadTables();
-  void buildHi();
-  void freeTables();
+  bool loadBytes();
+  void freeBytes();
+  bool initFaces();
+  void freeFaces();
   bool allocLru();
   void freeLru();
   bool allocTable(Lru& t, uint16_t cap, uint16_t stride);
   void freeTable(Lru& t);
   const uint8_t* cacheIn(Lru& t, uint16_t bodyId, bool ruby);
   const uint8_t* cacheSlot(uint16_t bodyId, bool ruby);
-  bool readSlot(uint16_t bodyId, bool ruby, uint8_t* dest);
+  bool rasterizeSlot(uint16_t bodyId, bool ruby, uint8_t* dest);
   bool blitUi(Gfx& gfx, int x, int y, uint16_t bodyId, int size, bool black);
 };
