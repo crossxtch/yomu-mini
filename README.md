@@ -2,7 +2,7 @@
 
 EPUB and plain-text reader for the Xteink X4 Classic. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
 
-The panel is 800×480 landscape. UI and pages are 480×800 portrait.
+The panel is 800×480 landscape. UI and pages are 480×800 portrait. Book opening and page layout come from the sibling `typeset` repo.
 
 ## Layout
 
@@ -13,7 +13,7 @@ src/screens/          home, browser, reader, chapters, settings, update
 src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
-lib/Typesetter        EPUB and UTF-8 text layout
+lib/Typesetter        X4 session, 2-bit paint, and the picture sidecar
 lib/XgfFont           on-device TrueType rasterizer
 lib/EpdFont           Ubuntu UI fonts
 reference/            CrossPoint submodule (lookup only)

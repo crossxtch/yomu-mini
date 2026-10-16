@@ -413,8 +413,9 @@ bool PictureWriter::begin(const char* path, const uint16_t w, const uint16_t h, 
   const uint32_t magic = kPictureMagic;
   const uint16_t zero = 0;
   const uint32_t pad = 0;
+  uint8_t sizes[kPictureSizeBytes]{};
   if (out.write(&magic, 4) != 4 || out.write(&n, 2) != 2 || out.write(&pageW, 2) != 2 || out.write(&pageH, 2) != 2 ||
-      out.write(&zero, 2) != 2 || out.write(&pad, 4) != 4) {
+      out.write(&zero, 2) != 2 || out.write(&pad, 4) != 4 || out.write(sizes, sizeof sizes) != sizeof sizes) {
     end();
     return false;
   }
@@ -432,18 +433,21 @@ void PictureWriter::end() {
   pageBytes = 0;
 }
 
-bool PictureWriter::seekSlot() { return out.seekSet(kPictureHeader + static_cast<uint32_t>(n) * pageBytes); }
+bool PictureWriter::seekSlot() { return out.seekSet(kPicturePixels + static_cast<uint32_t>(n) * pageBytes); }
 
 bool PictureWriter::writeZeroRows(uint8_t* zeros, const uint16_t nrows) {
   return writeZeros(out, zeros, rowBytes, nrows);
 }
 
-uint16_t PictureWriter::commit() {
-  if (n >= kMaxPictures) {
+uint16_t PictureWriter::commit(const uint16_t srcW, const uint16_t srcH) {
+  if (n >= kMaxPictures || srcW == 0 || srcH == 0) {
     return 0;
   }
   const uint16_t id = static_cast<uint16_t>(n + 1);
-  if (!out.seekSet(4) || out.write(&id, 2) != 2) {
+  const uint32_t sizeAt = kPictureHeader + static_cast<uint32_t>(id - 1) * 4u;
+  const uint16_t dims[2] = {srcW, srcH};
+  if (!out.seekSet(sizeAt) || out.write(dims, sizeof dims) != static_cast<int>(sizeof dims) || !out.seekSet(4) ||
+      out.write(&id, 2) != 2) {
     return 0;
   }
   n = id;
@@ -518,7 +522,7 @@ uint16_t PictureWriter::addJpeg(HalFile& image) {
   if (!writeZeroRows(sink.zeros, static_cast<uint16_t>(pageH - fit.y - fit.h))) {
     return 0;
   }
-  return commit();
+  return commit(srcW, srcH);
 }
 
 uint16_t PictureWriter::addPng(HalFile& image) {
@@ -586,7 +590,7 @@ uint16_t PictureWriter::addPng(HalFile& image) {
   if (!writeZeroRows(sink.zeros, bottom)) {
     return 0;
   }
-  return commit();
+  return commit(dec.scaler.srcW, dec.scaler.srcH);
 }
 
 bool pictureRead(const char* path, const uint16_t id, const uint16_t pageW, const uint16_t pageH, uint8_t* dst,
@@ -617,11 +621,47 @@ bool pictureRead(const char* path, const uint16_t id, const uint16_t pageW, cons
   if (magic != kPictureMagic || w != pageW || h != pageH || id > count) {
     return false;
   }
-  const uint32_t off = kPictureHeader + static_cast<uint32_t>(id - 1) * static_cast<uint32_t>(need);
+  const uint32_t off = kPicturePixels + static_cast<uint32_t>(id - 1) * static_cast<uint32_t>(need);
   if (!f.seekSet(off)) {
     return false;
   }
   return f.read(dst, need) == static_cast<int>(need);
+}
+
+bool pictureSize(const char* path, const uint16_t id, int* w, int* h) {
+  if (!path || !w || !h || id == 0 || id > kMaxPictures) {
+    return false;
+  }
+  HalFile f;
+  if (!Storage.openFileForRead("PIC", path, f)) {
+    return false;
+  }
+  uint8_t hdr[10];
+  if (f.read(hdr, sizeof hdr) != static_cast<int>(sizeof hdr)) {
+    return false;
+  }
+  uint32_t magic = 0;
+  uint16_t count = 0;
+  memcpy(&magic, hdr, 4);
+  memcpy(&count, hdr + 4, 2);
+  if (magic != kPictureMagic || id > count) {
+    return false;
+  }
+  uint8_t dim[4];
+  const uint32_t off = kPictureHeader + static_cast<uint32_t>(id - 1) * 4u;
+  if (!f.seekSet(off) || f.read(dim, sizeof dim) != static_cast<int>(sizeof dim)) {
+    return false;
+  }
+  uint16_t sw = 0;
+  uint16_t sh = 0;
+  memcpy(&sw, dim, 2);
+  memcpy(&sh, dim + 2, 2);
+  if (sw == 0 || sh == 0) {
+    return false;
+  }
+  *w = sw;
+  *h = sh;
+  return true;
 }
 
 }  // namespace ts

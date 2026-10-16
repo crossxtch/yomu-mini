@@ -870,6 +870,7 @@ TypesetBook::IndexStep TypesetBook::indexMore(const uint16_t budget, const uint3
       }
       return IndexStep::Done;
     }
+    preparePicture(atom);
     const bool isMode = atom.kind == ts::AtomKind::Mode;
     const ts::WritingMode nextMode =
         isMode ? (atom.cp == 1 ? ts::WritingMode::HorizontalTb : ts::WritingMode::VerticalRl) : cur;

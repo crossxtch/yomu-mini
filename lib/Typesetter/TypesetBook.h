@@ -159,6 +159,8 @@ class TypesetBook {
   bool setLastPicture(uint16_t pic);
   bool readPage(uint32_t index, uint32_t& off, uint8_t& mode, uint16_t& pic) const;
   bool atomCacheFresh() const;
+  // Fill in-memory picture size before feed. The atom file stores only the id.
+  void preparePicture(ts::Atom& atom) const;
   bool layoutPage(uint32_t pageIndex);
   void paint(Gfx& gfx, XgfFont::Plane plane);
   void logPaintedGlyphs(Gfx& gfx, uint32_t pageIndex) const;

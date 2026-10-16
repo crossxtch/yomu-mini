@@ -1,6 +1,6 @@
-// c++ -std=c++20 -I lib/Typesetter -I lib/Utf8 \
-//   tools/xgf2/test_htmlir.cpp lib/Typesetter/HtmlSax.cpp lib/Typesetter/HtmlIR.cpp \
-//   lib/Typesetter/FaceCss.cpp lib/Utf8/Utf8.cpp -o /tmp/test_htmlir && /tmp/test_htmlir
+// c++ -std=c++20 -I ../typeset/src -I lib/Utf8 \
+//   tools/xgf2/test_htmlir.cpp ../typeset/src/HtmlSax.cpp ../typeset/src/HtmlIR.cpp \
+//   ../typeset/src/FaceCss.cpp lib/Utf8/Utf8.cpp -o /tmp/test_htmlir && /tmp/test_htmlir
 
 #include "HtmlIR.h"
 
@@ -176,25 +176,20 @@ int main() {
       static_cast<Bag*>(ctx)->atoms.push_back(atom);
       return true;
     };
-    auto pic = [](void* ctx, const char* src, uint16_t* w, uint16_t* h) -> uint16_t {
+    auto pic = [](void* ctx, const char* src) -> uint16_t {
+      auto* bag = static_cast<Bag*>(ctx);
+      ++bag->hits;
       if (!src || std::strcmp(src, "c.jpg") != 0) {
         return 0;
       }
-      if (w) {
-        *w = 480;
-      }
-      if (h) {
-        *h = 800;
-      }
-      ++static_cast<Bag*>(ctx)->hits;
       return 4;
     };
     Bag bag;
     const char* html = "<html><body class=\"p-cover\"><img src=\"c.jpg\"/></body></html>";
     ts::AtomSink sink{&bag, emit, pic};
     ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
-    if (bag.hits != 1 || bag.atoms.size() != 1 || bag.atoms[0].kind != AtomKind::Picture || bag.atoms[0].cp != 4 ||
-        bag.atoms[0].startEm != 1 || bag.atoms[0].tcy[0] != 480) {
+    if (bag.hits != 1 || bag.atoms.size() != 1 || bag.atoms[0].kind != AtomKind::Picture ||
+        bag.atoms[0].cp != (4u | ts::kPictureForcePage) || bag.atoms[0].startEm != 0 || bag.atoms[0].tcyCount != 0) {
       fail("cover picture");
     }
     bag.atoms.clear();
@@ -205,10 +200,16 @@ int main() {
       fail("cover gaiji stayed a bitmap");
     }
     bag.atoms.clear();
+    bag.hits = 0;
     html = "<html><body><p><img src=\"a.jpg\"/></p></body></html>";
     ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
-    if (bag.hits != 0) {
-      fail("inline image called the picture decoder");
+    if (bag.hits != 1) {
+      fail("inline image skipped the picture decoder");
+    }
+    for (const Atom& a : bag.atoms) {
+      if (a.kind == AtomKind::Picture) {
+        fail("inline image with no id became a picture");
+      }
     }
   }
   {

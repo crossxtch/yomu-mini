@@ -5,8 +5,11 @@
     "Miniz": "*",
     "ScratchHeap": "*",
     "XgfFont": "*",
+    "FreeInkFont": "*",
     "hal": "*",
+    "typeset": "*",
     "Gfx": "*",
+    "EpdFont": "*",
     "BoardConfig": "*"
   }
 }

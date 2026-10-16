@@ -1,5 +1,7 @@
 // Host test for em-grid 縦書き + 禁則. Compile:
-//   c++ -std=c++20 -I lib/Typesetter tools/xgf2/test_layout.cpp lib/Typesetter/Layout.cpp lib/Typesetter/Kinsoku.cpp -o /tmp/test_layout && /tmp/test_layout
+//   c++ -std=c++20 -DTS_MAX_GLYPHS=256 -I ../typeset/src -I lib/Typesetter \
+//     tools/xgf2/test_layout.cpp ../typeset/src/Layout.cpp ../typeset/src/Kinsoku.cpp \
+//     -o /tmp/test_layout && /tmp/test_layout
 
 #include "Kinsoku.h"
 #include "Layout.h"

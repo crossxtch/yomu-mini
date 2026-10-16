@@ -1,5 +1,7 @@
 #include "TypesetBook.h"
 
+#include "PicturePage.h"
+
 #include <BoardConfig.h>
 #include <Logging.h>
 #include <ScratchHeap.h>
@@ -631,11 +633,11 @@ bool TypesetBook::atomCacheFresh() const {
     HalFile atom;
     uint32_t magic = 0;
     if (!Storage.openFileForRead("TS", atomPath, atom) || atom.read(&magic, 4) != 4 || magic != ts::kAtomMagic) {
-      return false;  // pre-IRA7 ingest; the atom record gained a size byte
+      return false;  // older atom magic; picture size is no longer in the record
     }
   }
   // A cache-clear used to leave a file of page-breaks, about one byte each.
-  // A real cover book is that small too, and its PIC1 header says so.
+  // A real cover book is that small too, and its PIC2 header says so.
   // A resumed slice is also small until the next chapter is appended.
   if (!cursorOk && endsWithI(filepath, ".epub") && sourceSize < 2048 &&
       !pictureSidecarFresh(picturePath, static_cast<uint16_t>(layoutOpt.width),
@@ -752,6 +754,25 @@ bool TypesetBook::finishIndex() {
   return true;
 }
 
+void TypesetBook::preparePicture(ts::Atom& atom) const {
+  if (atom.kind != ts::AtomKind::Picture) {
+    return;
+  }
+  const uint16_t raw = static_cast<uint16_t>(atom.cp > 0xFFFFu ? 0xFFFFu : atom.cp);
+  const bool force = (raw & ts::kPictureForcePage) != 0;
+  const uint16_t id = static_cast<uint16_t>(raw & ts::kPictureIdMask);
+  atom.cp = id;
+  atom.startEm = force ? 1 : 0;
+  atom.tcyCount = 0;
+  int w = 0;
+  int h = 0;
+  if (!force && id != 0 && ts::pictureSize(picturePath, id, &w, &h) && w > 0 && h > 0) {
+    atom.tcy[0] = static_cast<uint32_t>(w);
+    atom.tcy[1] = static_cast<uint32_t>(h);
+    atom.tcyCount = 2;
+  }
+}
+
 bool TypesetBook::layoutPage(const uint32_t pageIndex) {
   if (pageIndex >= nPages) {
     error = "page range";
@@ -786,6 +807,7 @@ bool TypesetBook::layoutPage(const uint32_t pageIndex) {
     if (!atoms.next(atom)) {
       break;
     }
+    preparePicture(atom);
     if (layouter.feed(atom, atomPos)) {
       complete = true;
       break;
