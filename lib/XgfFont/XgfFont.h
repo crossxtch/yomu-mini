@@ -80,8 +80,18 @@ class XgfFont {
   };
   CacheStats cacheStats() const;
 
+  // Horizontal advance in pixels. 0 when the face has no glyph.
+  int16_t advancePx(uint32_t cp, int px);
+
   // Blit one em (or ruby) slot at logical top-left. rotate90 is 90° CW, y-down.
-  bool blit(Gfx& gfx, int x, int y, uint16_t bodyId, bool ruby, bool rotate90, Plane plane);
+  // style bit 0 requests the emboldened cache entry.
+  bool blit(Gfx& gfx, int x, int y, uint16_t bodyId, bool ruby, bool rotate90, Plane plane, uint8_t style = 0);
+
+  // Ink for a cell that is not the cached full em: a half-em 約物, a bold face,
+  // a scaled em, or a proportional advance. Vertical text uses vert/vrt2 when
+  // the face has it; otherwise 約物 is centered in the cell and clipped.
+  bool blitCell(Gfx& gfx, int x, int y, int cellW, int cellH, uint16_t bodyId, int px, bool vertical, bool bold,
+                bool rotate90, bool yakumono, Plane plane);
 
   // Scale a body glyph into a size×size box. Used for 縦中横.
   bool blitBox(Gfx& gfx, int x, int y, uint16_t bodyId, int size, Plane plane);
@@ -94,6 +104,7 @@ class XgfFont {
   struct LruEntry {
     uint16_t id = 0xFFFF;
     uint16_t recency = 0;
+    uint8_t style = 0;  // bit 0: emboldened outline. A bold slot must not satisfy a regular lookup.
   };
   struct Lru {
     uint8_t* pixels = nullptr;
@@ -121,6 +132,7 @@ class XgfFont {
   freeink::font::FtFont rubyFace;
   uint8_t emPx_ = kEmPx;
   uint8_t rubyEmPx_ = kRubyEmPx;
+  void* vert = nullptr;  // GSUB vert/vrt2 pairs. Null when the face has none.
 
   Lru bodyLru;
   Lru rubyLru;
@@ -138,12 +150,16 @@ class XgfFont {
   void freeBytes();
   bool initFaces();
   void freeFaces();
+  void clearVert();
+  void loadVert();
+  uint16_t vertOf(uint16_t gid) const;
+  bool readFont(uint32_t off, uint8_t* dst, uint32_t n);
   bool allocLru();
   void freeLru();
   bool allocTable(Lru& t, uint16_t cap, uint16_t stride);
   void freeTable(Lru& t);
-  const uint8_t* cacheIn(Lru& t, uint16_t bodyId, bool ruby);
-  const uint8_t* cacheSlot(uint16_t bodyId, bool ruby);
-  bool rasterizeSlot(uint16_t bodyId, bool ruby, uint8_t* dest);
+  const uint8_t* cacheIn(Lru& t, uint16_t bodyId, bool ruby, uint8_t style);
+  const uint8_t* cacheSlot(uint16_t bodyId, bool ruby, uint8_t style = 0);
+  bool rasterizeSlot(uint16_t bodyId, bool ruby, uint8_t* dest, bool bold = false);
   bool blitUi(Gfx& gfx, int x, int y, uint16_t bodyId, int size, bool black);
 };

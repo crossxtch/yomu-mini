@@ -9,7 +9,7 @@
 
 class ReaderScreen final : public Screen {
   char bookPath[256]{};
-  // Heap-allocated: TypesetBook holds ~24 KB of glyph-run arrays, and
+  // Heap-allocated: TypesetBook holds ~36 KB of glyph-run arrays, and
   // BrowserScreen is still alive when the reader opens.
   std::unique_ptr<TypesetBook> book;
   uint32_t page = 0;

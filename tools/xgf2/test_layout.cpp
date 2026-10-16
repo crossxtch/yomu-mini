@@ -23,6 +23,12 @@ int main() {
   if (ts::kinsokuCanEndColumn(0x300C) == true) {
     fail("「 must not end a column");
   }
+  if (ts::kinsokuCanStartColumn(0x3015) == true) {
+    fail("〕 must not start a column");
+  }
+  if (ts::kinsokuCanEndColumn(0x3014) == true) {
+    fail("〔 must not end a column");
+  }
   if (!ts::shouldRotate('A') || ts::shouldRotate(0x4E00)) {
     fail("rotate ASCII not 一");
   }
@@ -144,9 +150,9 @@ int main() {
   lay.begin(grid);
   must(lay, ch(0x300C));
   lay.finish();
-  if (lay.page()[0].advance != 10 || (lay.page()[0].flags & ts::kRunHalfCell) != 0) {
+  if (lay.page()[0].advance != 5 || (lay.page()[0].flags & ts::kRunHalfCell) == 0) {
     dump(lay);
-    fail("「 stays a full em");
+    fail("「 advance");
   }
 
   const int col0 = lay.page()[0].x;
@@ -217,7 +223,8 @@ int main() {
       nextCh = &lay.page()[i];
     }
   }
-  if (!bracket || !nextCh || bracket->x != col1 || bracket->y != top || nextCh->x != col1 || nextCh->y != top + 10) {
+  if (!bracket || !nextCh || bracket->x != col1 || bracket->y != top || nextCh->x != col1 || nextCh->y != top + 5 ||
+      bracket->advance != 5) {
     dump(lay);
     fail("「 should be pulled with the next char");
   }
@@ -280,9 +287,107 @@ int main() {
     }
   }
   if (!first || !bracket || !nextCh || bracket->y == first->y || bracket->x != first->x || nextCh->y != bracket->y ||
-      nextCh->x != bracket->x + 10 || (bracket->flags & ts::kRunRubyAbove) == 0) {
+      nextCh->x != bracket->x + 5 || (bracket->flags & ts::kRunRubyAbove) == 0) {
     dump(lay);
     fail("horizontal 「 should wrap with the next char");
+  }
+
+  lay.begin(grid);
+  {
+    ts::Atom g{};
+    g.kind = ts::AtomKind::Group;
+    g.cp = 0x6771;
+    g.tcyCount = 2;
+    g.tcy[0] = 0x6771;
+    g.tcy[1] = 0x4EAC;
+    g.rubyCount = 6;
+    g.ruby[0] = 0x3068;
+    g.ruby[1] = 0x3046;
+    g.ruby[2] = 0x304D;
+    g.ruby[3] = 0x3087;
+    g.ruby[4] = 0x3046;
+    g.ruby[5] = 0x3046;
+    must(lay, g);
+  }
+  lay.finish();
+  const ts::GlyphRun* tou = nullptr;
+  const ts::GlyphRun* kyou = nullptr;
+  for (uint16_t i = 0; i < lay.pageGlyphCount(); ++i) {
+    if (lay.page()[i].cp == 0x6771) {
+      tou = &lay.page()[i];
+    }
+    if (lay.page()[i].cp == 0x4EAC) {
+      kyou = &lay.page()[i];
+    }
+  }
+  if (!tou || !kyou || tou->rubyCount != 6 || (kyou->flags & ts::kRunSticky) == 0 || kyou->y != tou->y + 10 ||
+      kyou->x != tou->x) {
+    dump(lay);
+    fail("six-kana group");
+  }
+
+  horiz.measure = [](void*, uint32_t cp, int16_t) -> int16_t { return cp < 128 ? static_cast<int16_t>(6) : 0; };
+  lay.begin(horiz);
+  must(lay, ch('A'));
+  lay.finish();
+  if (lay.pageGlyphCount() != 1 || lay.page()[0].advance != 6 || (lay.page()[0].flags & ts::kRunRotate) != 0) {
+    dump(lay);
+    fail("horizontal Latin advance");
+  }
+  lay.begin(horiz);
+  {
+    ts::Atom a = ch('A');
+    a.rubyCount = 4;
+    a.ruby[0] = 0x3042;
+    a.ruby[1] = 0x3044;
+    a.ruby[2] = 0x3046;
+    a.ruby[3] = 0x3048;
+    must(lay, a);
+  }
+  lay.finish();
+  if (lay.pageGlyphCount() != 1 || lay.page()[0].advance != 20) {
+    dump(lay);
+    fail("horizontal ruby base should widen");
+  }
+  lay.begin(grid);
+  must(lay, ch('A'));
+  lay.finish();
+  if (lay.pageGlyphCount() != 1 || lay.page()[0].advance != 10 || (lay.page()[0].flags & ts::kRunRotate) == 0) {
+    dump(lay);
+    fail("vertical Latin stays on the em");
+  }
+
+  ts::LayoutOptions plate = grid;
+  plate.width = 200;
+  plate.height = 400;
+  plate.em = 20;
+  lay.begin(plate);
+  {
+    ts::Atom pic{};
+    pic.kind = ts::AtomKind::Picture;
+    pic.cp = 1;
+    pic.tcyCount = 2;
+    pic.tcy[0] = 80;
+    pic.tcy[1] = 40;
+    must(lay, pic);
+  }
+  lay.finish();
+  if (lay.takenPicture() != 0 || lay.pageGlyphCount() != 1 || (lay.page()[0].flags & ts::kRunPicture) == 0 ||
+      lay.page()[0].ruby[0] != 80 || lay.page()[0].ruby[1] != 40) {
+    dump(lay);
+    fail("small picture stays in the column");
+  }
+  lay.begin(plate);
+  {
+    ts::Atom pic{};
+    pic.kind = ts::AtomKind::Picture;
+    pic.cp = 2;
+    pic.tcyCount = 2;
+    pic.tcy[0] = 300;
+    pic.tcy[1] = 300;
+    if (!lay.feed(pic, 1) || lay.takenPicture() != 2) {
+      fail("large picture is its own page");
+    }
   }
 
   lay.begin(opt);

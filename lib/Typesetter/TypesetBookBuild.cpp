@@ -468,13 +468,21 @@ bool TypesetBook::ingestSlice(const uint16_t maxSpines, ts::EpubBook::ProgressFn
   ts::EpubBook epub;
   const uint16_t slice = maxSpines == 0 ? 1 : maxSpines;
   const bool append = atomBytes >= 4;
+  const bool firstSlice = nextSpine == 0;
+  // A vertical book stays vertical. A later image or untitled file must not
+  // put the package's horizontal-lr back.
+  if (!firstSlice && layoutOpt.mode == ts::WritingMode::VerticalRl) {
+    epub.preferVertical();
+  }
   const bool ok = epub.open(filepath, atomPath, progress, progressCtx, static_cast<uint16_t>(layoutOpt.width),
                             static_cast<uint16_t>(layoutOpt.height), picturePath, nextSpine, slice, append, atomBytes);
   if (ok) {
     if (epub.title()[0]) {
       snprintf(bookTitle, sizeof(bookTitle), "%s", epub.title());
     }
-    layoutOpt.mode = epub.bookMode();
+    if (firstSlice || epub.bookMode() == ts::WritingMode::VerticalRl) {
+      layoutOpt.mode = epub.bookMode();
+    }
     nextSpine = epub.ingestedEnd();
     spineCount = epub.spineCount();
     atomBytes = fileSizeOf(atomPath);

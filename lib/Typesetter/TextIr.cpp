@@ -88,7 +88,7 @@ bool pieceOf(const Atom& a, uint32_t* out, uint8_t& n, const bool plainOnly) {
   if (plainOnly || (a.kind != AtomKind::Tcy && a.kind != AtomKind::Group)) {
     return false;
   }
-  n = a.tcyCount > 4 ? 4 : a.tcyCount;
+  n = a.tcyCount > kMaxCluster ? kMaxCluster : a.tcyCount;
   if (n == 0) {
     return false;
   }
@@ -244,10 +244,10 @@ void Utf8AtomReader::pushChar(const uint32_t cp, const uint32_t at) {
     if (tcyN == 0) {
       tcyAt = at;
     }
-    if (tcyN < 4) {
+    if (tcyN < kMaxCluster) {
       tcyBuf[tcyN++] = cp;
     }
-    if (tcyN == 4) {
+    if (tcyN == kMaxCluster) {
       flushTcy(false);
     }
     return;
@@ -275,7 +275,7 @@ void Utf8AtomReader::appendRuby(const uint32_t* bases, const uint8_t baseN, cons
     pushTail(a, at);
     return;
   }
-  if (rubyN != baseN && baseN <= 4) {
+  if (rubyN != baseN && baseN <= kMaxCluster) {
     Atom g{};
     g.kind = AtomKind::Group;
     g.tcyCount = baseN;
@@ -300,7 +300,7 @@ void Utf8AtomReader::appendRuby(const uint32_t* bases, const uint8_t baseN, cons
     }
     return;
   }
-  const uint8_t groupN = baseN > 4 ? 4 : baseN;
+  const uint8_t groupN = baseN > kMaxCluster ? kMaxCluster : baseN;
   Atom g{};
   g.kind = AtomKind::Group;
   g.tcyCount = groupN;
@@ -329,7 +329,7 @@ bool Utf8AtomReader::suffixMatch(const uint32_t* text, const uint8_t textN, uint
   int idx = tailN;
   while (idx > 0 && gotN < textN) {
     --idx;
-    uint32_t piece[4]{};
+    uint32_t piece[kMaxCluster]{};
     uint8_t pn = 0;
     if (!pieceOf(tail[idx], piece, pn, plainOnly)) {
       return false;
@@ -367,8 +367,8 @@ void Utf8AtomReader::applyTcy(const uint32_t* text, const uint8_t textN) {
   uint8_t i = 0;
   while (i < textN) {
     uint8_t n = static_cast<uint8_t>(textN - i);
-    if (n > 4) {
-      n = 4;
+    if (n > kMaxCluster) {
+      n = kMaxCluster;
     }
     Atom t{};
     t.kind = AtomKind::Tcy;

@@ -43,7 +43,7 @@ class Utf8AtomReader {
 
   uint8_t emphasis = 0;
   bool tcyOpen = false;
-  uint32_t tcyBuf[4]{};
+  uint32_t tcyBuf[kMaxCluster]{};
   uint8_t tcyN = 0;
   uint32_t tcyAt = 0;
   bool stop = false;

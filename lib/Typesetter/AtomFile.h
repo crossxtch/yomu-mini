@@ -8,13 +8,14 @@
 
 namespace ts {
 
-// IRA6. Picture atoms carry a page id. A file without this header is rebuilt.
-constexpr uint32_t kAtomMagic = 0x36415249u;
+// IRA7. Ch/Tcy/Group carry a size percent and a bold bit. Picture atoms carry
+// a page id plus the source pixel size. A file without this header is rebuilt.
+constexpr uint32_t kAtomMagic = 0x37415249u;
 
 class AtomWriter {
  public:
   bool open(const char* path);
-  // Continue an IRA6 file. Bytes past `keepBytes` are dropped so a torn slice is rewritten.
+  // Continue an IRA7 file. Bytes past `keepBytes` are dropped so a torn slice is rewritten.
   bool openAppend(const char* path, uint32_t keepBytes);
   void close();
   bool write(const Atom& a);

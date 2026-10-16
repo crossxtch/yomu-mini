@@ -59,12 +59,13 @@ class TypesetBook {
   static bool hasBookExt(const char* path);
 
  private:
-  // TID7 is a finished index: 24-byte header, then 7-byte records.
-  // TID8 keeps that header and adds a 24-byte tail so a chapter window can
-  // resume. Records then start at byte 48. Promotion back to TID7 only
+  // TID9 is a finished index: 24-byte header, then 7-byte records.
+  // TIDA keeps that header and adds a 24-byte tail so a chapter window can
+  // resume. Records then start at byte 48. Promotion back to TID9 only
   // happens for a complete prefix that starts at the first atom.
-  static constexpr uint32_t kIndexMagic = 0x37444954u;
-  static constexpr uint32_t kIndexPartial = 0x38444954u;
+  // Half-em brackets and inline pictures change page breaks, so TID7/TID8 rebuild.
+  static constexpr uint32_t kIndexMagic = 0x39444954u;
+  static constexpr uint32_t kIndexPartial = 0x41444954u;
   static constexpr uint32_t kIndexPayload = 24;
   static constexpr uint32_t kPartialPayload = 48;
   static constexpr uint32_t kFlagIngest = 1u;
@@ -125,6 +126,7 @@ class TypesetBook {
   uint16_t loadedCount = 0;
   uint16_t loadedPicture = 0;
   uint8_t* pictureBits = nullptr;  // borrowed ScratchHeap page, valid only while painting
+  uint16_t scratchPic = 0;         // id currently in pictureBits, including an inline crop
 
   bool loadFont(const char* fontPath);
   enum class IndexStep { Ok, NeedAtoms, Done, Error };

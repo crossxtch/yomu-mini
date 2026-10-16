@@ -169,6 +169,13 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
   layoutOpt.hasRuby = true;
   layoutOpt.compactColumns = false;
   layoutOpt.mode = ts::WritingMode::VerticalRl;
+  layoutOpt.measure = [](void* ctx, uint32_t cp, int16_t em) -> int16_t {
+    if (!ctx || em <= 0) {
+      return 0;
+    }
+    return static_cast<XgfFont*>(ctx)->advancePx(cp, em);
+  };
+  layoutOpt.measureCtx = &font;
 
   const unsigned long hash = static_cast<unsigned long>(pathHash(filepath));
   char primary[64];
@@ -624,7 +631,7 @@ bool TypesetBook::atomCacheFresh() const {
     HalFile atom;
     uint32_t magic = 0;
     if (!Storage.openFileForRead("TS", atomPath, atom) || atom.read(&magic, 4) != 4 || magic != ts::kAtomMagic) {
-      return false;  // pre-IRA6 ingest; picture pages changed the atom stream
+      return false;  // pre-IRA7 ingest; the atom record gained a size byte
     }
   }
   // A cache-clear used to leave a file of page-breaks, about one byte each.

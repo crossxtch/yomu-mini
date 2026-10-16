@@ -1,5 +1,7 @@
 #include "TypesetBook.h"
 
+#include "Kinsoku.h"
+#include "PictureDither.h"
 #include "PicturePage.h"
 
 #include <Gfx.h>
@@ -73,6 +75,41 @@ void blitPicture(Gfx& gfx, const uint8_t* bits, const int pageW, const int pageH
   }
 }
 
+uint8_t pictureAt(const uint8_t* bits, const int pageW, const int x, const int y) {
+  const int rowBytes = pageW / 4;
+  const uint8_t b = bits[static_cast<size_t>(y) * static_cast<size_t>(rowBytes) + static_cast<size_t>(x >> 2)];
+  return static_cast<uint8_t>((b >> (6 - 2 * (x & 3))) & 3);
+}
+
+// Crop the contain-fit rect out of a stored page and scale it into the column box.
+void blitPictureBox(Gfx& gfx, const uint8_t* bits, const int pageW, const int pageH, const int srcX, const int srcY,
+                    const int srcW, const int srcH, const int dstX, const int dstY, const int dstW, const int dstH,
+                    const XgfFont::Plane plane) {
+  if (!bits || srcW < 1 || srcH < 1 || dstW < 1 || dstH < 1 || pageW < 4) {
+    return;
+  }
+  for (int dy = 0; dy < dstH; ++dy) {
+    int sy = srcY + dy * srcH / dstH;
+    if (sy >= pageH) {
+      sy = pageH - 1;
+    }
+    if (sy < 0) {
+      continue;
+    }
+    for (int dx = 0; dx < dstW; ++dx) {
+      int sx = srcX + dx * srcW / dstW;
+      if (sx < 0 || sx >= pageW) {
+        continue;
+      }
+      const uint8_t v = pictureAt(bits, pageW, sx, sy);
+      if (!planeKeep(v, plane)) {
+        continue;
+      }
+      gfx.drawPixel(dstX + dx, dstY + dy, plane == XgfFont::Plane::Ink);
+    }
+  }
+}
+
 // Black pixels in a logical square. Bit 0 is black, same map as Gfx::drawPixel.
 uint16_t cellBlack(const Gfx& gfx, const int x, const int y, const int size) {
   const uint8_t* fb = gfx.frameBuffer();
@@ -139,16 +176,53 @@ void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
     }
     return;
   }
-  if (plane != XgfFont::Plane::Ink) {
-    // Stems stay on the ink frame. Walking glyphs here would miss the cache
-    // while a refresh owns SPI and store a 0xFF block for that character.
-    return;
-  }
   const int em = font.emPx();
   const int rubyEm = font.rubyEmPx();
+  const uint16_t pageW = static_cast<uint16_t>(layoutOpt.width);
+  const uint16_t pageH = static_cast<uint16_t>(layoutOpt.height);
+  auto paintInline = [&](const ts::GlyphRun& g) {
+    const uint16_t id = static_cast<uint16_t>(g.cp > 0xFFFFu ? 0xFFFFu : g.cp);
+    if (id == 0 || pageW < 4 || pageH == 0) {
+      return;
+    }
+    const size_t nbytes = static_cast<size_t>(pageW / 4) * pageH;
+    if (scratchPic != id || !pictureBits) {
+      uint8_t* dst = ScratchHeap::data();
+      if (!dst || ScratchHeap::size() < nbytes ||
+          !ts::pictureRead(picturePath, id, pageW, pageH, dst, nbytes)) {
+        return;
+      }
+      pictureBits = dst;
+      scratchPic = id;
+    }
+    ts::FitBox fit = ts::containFit(static_cast<uint16_t>(g.ruby[0] > 65535u ? 65535u : g.ruby[0]),
+                                    static_cast<uint16_t>(g.ruby[1] > 65535u ? 65535u : g.ruby[1]), pageW, pageH);
+    if (fit.w == 0 || fit.h == 0) {
+      fit.x = 0;
+      fit.y = 0;
+      fit.w = pageW;
+      fit.h = pageH;
+    }
+    const int dw = g.size > 0 ? static_cast<int>(g.size) : 1;
+    const int dh = g.advance > 0 ? static_cast<int>(g.advance) : 1;
+    blitPictureBox(gfx, pictureBits, pageW, pageH, fit.x, fit.y, fit.w, fit.h, g.x, g.y, dw, dh, plane);
+  };
+  if (plane != XgfFont::Plane::Ink) {
+    // Glyph stems stay on the ink frame. An inline picture still has gray.
+    for (uint16_t i = 0; i < loadedCount; ++i) {
+      if (ts::runPicture(loadedGlyphs[i])) {
+        paintInline(loadedGlyphs[i]);
+      }
+    }
+    return;
+  }
 
   for (uint16_t i = 0; i < loadedCount; ++i) {
     const ts::GlyphRun& g = loadedGlyphs[i];
+    if (ts::runPicture(g)) {
+      paintInline(g);
+      continue;
+    }
     const bool vert = !ts::runRubyAbove(g);
     const int adv = ts::runAdvance(g);
     const bool tcyRun = ts::runTcy(g) && g.rubyCount > 1;
@@ -167,26 +241,37 @@ void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
           id = font.glyphId(fallbackCp(g.ruby[r]));
         }
         if (id != 0xFFFF) {
-          font.blitBox(gfx, x0 + r * size, y0, id, size, plane);
+          if ((g.flags & ts::kRunBold) != 0) {
+            font.blitCell(gfx, x0 + r * size, y0, size, size, id, size, false, true, false, false, plane);
+          } else {
+            font.blitBox(gfx, x0 + r * size, y0, id, size, plane);
+          }
         }
       }
     } else {
-      int drawX = g.x;
-      int drawY = g.y;
-      if ((g.flags & ts::kRunHalfCell) != 0 && g.advance > 0 && g.advance < g.size) {
-        const int shift = (static_cast<int>(g.size) - static_cast<int>(g.advance)) / 2;
-        if (vert) {
-          drawY -= shift;
-        } else {
-          drawX -= shift;
-        }
-      }
       uint16_t id = font.glyphId(g.cp);
       if (id == 0xFFFF) {
         id = font.glyphId(fallbackCp(g.cp));
       }
       if (id != 0xFFFF) {
-        font.blit(gfx, drawX, drawY, id, false, ts::runRotate90(g), plane);
+        const bool bold = (g.flags & ts::kRunBold) != 0;
+        const bool half = (g.flags & ts::kRunHalfCell) != 0;
+        const int face = g.size > 0 ? static_cast<int>(g.size) : em;
+        const bool proportional = adv != face;
+        if (half || bold || face != em || proportional) {
+          int cellW = vert ? face : adv;
+          int cellH = vert ? adv : face;
+          if (cellW < 1) {
+            cellW = 1;
+          }
+          if (cellH < 1) {
+            cellH = 1;
+          }
+          font.blitCell(gfx, g.x, g.y, cellW, cellH, id, face, vert, bold, ts::runRotate90(g), ts::kinsokuYakumono(g.cp),
+                        plane);
+        } else {
+          font.blit(gfx, g.x, g.y, id, false, ts::runRotate90(g), plane);
+        }
       }
     }
 
@@ -388,7 +473,9 @@ void TypesetBook::logPaintedGlyphs(Gfx& gfx, const uint32_t pageIndex) const {
   const int rubyEm = font.rubyEmPx();
   for (uint16_t i = 0; i < loadedCount; ++i) {
     const ts::GlyphRun& g = loadedGlyphs[i];
-    const bool vert = !ts::runRubyAbove(g);
+    if (ts::runPicture(g)) {
+      continue;
+    }
     const bool tcyRun = ts::runTcy(g) && g.rubyCount > 1;
     if (tcyRun) {
       const int n = g.rubyCount;
@@ -412,22 +499,15 @@ void TypesetBook::logPaintedGlyphs(Gfx& gfx, const uint32_t pageIndex) const {
       continue;
     }
 
-    int drawX = g.x;
-    int drawY = g.y;
-    if ((g.flags & ts::kRunHalfCell) != 0 && g.advance > 0 && g.advance < g.size) {
-      const int shift = (static_cast<int>(g.size) - static_cast<int>(g.advance)) / 2;
-      if (vert) {
-        drawY -= shift;
-      } else {
-        drawX -= shift;
-      }
-    }
+    const int drawX = g.x;
+    const int drawY = g.y;
+    const int box = (g.flags & ts::kRunHalfCell) != 0 ? ts::runAdvance(g) : em;
     if (fresh(g.cp)) {
       uint16_t id = font.glyphId(g.cp);
       if (id == 0xFFFF) {
         id = font.glyphId(fallbackCp(g.cp));
       }
-      token(g.cp, id, false, drawX, drawY, em, g.flags, true);
+      token(g.cp, id, false, drawX, drawY, box, g.flags, true);
     }
     if (g.rubyCount == 0 || rubyEm == 0) {
       continue;
@@ -466,6 +546,7 @@ bool TypesetBook::drawPage(Gfx& gfx, const uint32_t pageIndex, int& pagesUntilFu
   // SD and the panel share SPI. Read the page before the grayscale waveform starts.
   const unsigned long tPic = millis();
   pictureBits = nullptr;
+  scratchPic = 0;
   if (loadedPicture != 0) {
     const uint16_t pw = static_cast<uint16_t>(layoutOpt.width);
     const uint16_t ph = static_cast<uint16_t>(layoutOpt.height);
@@ -473,6 +554,7 @@ bool TypesetBook::drawPage(Gfx& gfx, const uint32_t pageIndex, int& pagesUntilFu
     uint8_t* dst = ScratchHeap::data();
     if (dst && ScratchHeap::size() >= nbytes && ts::pictureRead(picturePath, loadedPicture, pw, ph, dst, nbytes)) {
       pictureBits = dst;
+      scratchPic = loadedPicture;
     } else {
       LOG_ERR("TS", "picture %u missing", loadedPicture);
     }

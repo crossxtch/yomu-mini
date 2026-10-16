@@ -128,8 +128,8 @@ bool AtomWriter::write(const Atom& a) {
   if (!healthy) {
     return false;
   }
-  // Group is the widest: kind + base count + 4 bases + ruby count + 8 readings + emphasis.
-  uint8_t buf[64];
+  // Group is the widest: kind + base count + 8 bases + ruby count + 8 readings + emphasis + scale.
+  uint8_t buf[80];
   uint8_t n = 0;
   auto u8 = [&](const uint8_t v) { buf[n++] = v; };
   auto u32 = [&](const uint32_t v) {
@@ -148,11 +148,12 @@ bool AtomWriter::write(const Atom& a) {
         u32(a.ruby[i]);
       }
       u8(a.emphasis);
+      u8(a.startEm);
       break;
     }
     case AtomKind::Group: {
-      const uint8_t nBase = a.tcyCount > 4 ? 4 : a.tcyCount;
-      const uint8_t nRuby = a.rubyCount > 8 ? 8 : a.rubyCount;
+      const uint8_t nBase = a.tcyCount > kMaxCluster ? kMaxCluster : a.tcyCount;
+      const uint8_t nRuby = a.rubyCount > kMaxCluster ? kMaxCluster : a.rubyCount;
       u8(nBase);
       for (uint8_t i = 0; i < nBase; ++i) {
         u32(a.tcy[i]);
@@ -162,27 +163,38 @@ bool AtomWriter::write(const Atom& a) {
         u32(a.ruby[i]);
       }
       u8(a.emphasis);
+      u8(a.startEm);
       break;
     }
     case AtomKind::Mode:
       u8(static_cast<uint8_t>(a.cp));
       break;
     case AtomKind::Tcy: {
-      const uint8_t count = a.tcyCount > 4 ? 4 : a.tcyCount;
+      const uint8_t count = a.tcyCount > kMaxCluster ? kMaxCluster : a.tcyCount;
       u8(count);
       for (uint8_t i = 0; i < count; ++i) {
         u32(i == 0 ? a.cp : a.tcy[i]);
       }
       u8(a.emphasis);
+      u8(a.startEm);
       break;
     }
     case AtomKind::ColumnBreak:
       u8(a.startEm);
       break;
     case AtomKind::Picture: {
-      const uint16_t id = static_cast<uint16_t>(a.cp);
+      uint16_t id = static_cast<uint16_t>(a.cp > 0xFFFFu ? 0xFFFFu : a.cp);
+      if (a.startEm != 0) {
+        id = static_cast<uint16_t>(id | 0x8000u);
+      }
       u8(static_cast<uint8_t>(id));
       u8(static_cast<uint8_t>(id >> 8));
+      const uint16_t pw = a.tcyCount >= 1 ? static_cast<uint16_t>(a.tcy[0] > 0xFFFFu ? 0xFFFFu : a.tcy[0]) : 0;
+      const uint16_t ph = a.tcyCount >= 2 ? static_cast<uint16_t>(a.tcy[1] > 0xFFFFu ? 0xFFFFu : a.tcy[1]) : 0;
+      u8(static_cast<uint8_t>(pw));
+      u8(static_cast<uint8_t>(pw >> 8));
+      u8(static_cast<uint8_t>(ph));
+      u8(static_cast<uint8_t>(ph >> 8));
       break;
     }
     default:
@@ -243,10 +255,10 @@ bool AtomReader::next(Atom& a) {
         }
       }
       a.rubyCount = keep;
-      if (!readU8(file, a.emphasis)) {
+      if (!readU8(file, a.emphasis) || !readU8(file, a.startEm)) {
         return false;
       }
-      pos += 1;
+      pos += 2;
       break;
     }
     case AtomKind::Group: {
@@ -255,7 +267,7 @@ bool AtomReader::next(Atom& a) {
       }
       pos += 1;
       const uint8_t nBase = a.tcyCount;
-      const uint8_t keepBase = nBase > 4 ? 4 : nBase;
+      const uint8_t keepBase = nBase > kMaxCluster ? kMaxCluster : nBase;
       for (uint8_t i = 0; i < nBase; ++i) {
         uint32_t cp = 0;
         if (!readU32(file, cp)) {
@@ -273,7 +285,7 @@ bool AtomReader::next(Atom& a) {
       }
       pos += 1;
       const uint8_t nRuby = a.rubyCount;
-      const uint8_t keepRuby = nRuby > 8 ? 8 : nRuby;
+      const uint8_t keepRuby = nRuby > kMaxCluster ? kMaxCluster : nRuby;
       for (uint8_t i = 0; i < nRuby; ++i) {
         uint32_t cp = 0;
         if (!readU32(file, cp)) {
@@ -285,10 +297,10 @@ bool AtomReader::next(Atom& a) {
         }
       }
       a.rubyCount = keepRuby;
-      if (!readU8(file, a.emphasis)) {
+      if (!readU8(file, a.emphasis) || !readU8(file, a.startEm)) {
         return false;
       }
-      pos += 1;
+      pos += 2;
       break;
     }
     case AtomKind::Mode:
@@ -305,7 +317,7 @@ bool AtomReader::next(Atom& a) {
         return false;
       }
       pos += 1;
-      const uint8_t keep = n > 4 ? 4 : n;
+      const uint8_t keep = n > kMaxCluster ? kMaxCluster : n;
       for (uint8_t i = 0; i < n; ++i) {
         uint32_t cp = 0;
         if (!readU32(file, cp)) {
@@ -320,10 +332,10 @@ bool AtomReader::next(Atom& a) {
         }
       }
       a.tcyCount = keep;
-      if (!readU8(file, a.emphasis)) {
+      if (!readU8(file, a.emphasis) || !readU8(file, a.startEm)) {
         return false;
       }
-      pos += 1;
+      pos += 2;
       break;
     }
     case AtomKind::ColumnBreak:
@@ -333,12 +345,17 @@ bool AtomReader::next(Atom& a) {
       pos += 1;
       break;
     case AtomKind::Picture: {
-      uint8_t b[2];
-      if (file.read(b, 2) != 2) {
+      uint8_t b[6];
+      if (file.read(b, 6) != 6) {
         return false;
       }
-      pos += 2;
-      a.cp = static_cast<uint32_t>(b[0] | (b[1] << 8));
+      pos += 6;
+      const uint16_t raw = static_cast<uint16_t>(b[0] | (b[1] << 8));
+      a.cp = static_cast<uint32_t>(raw & 0x7FFFu);
+      a.startEm = (raw & 0x8000u) != 0 ? 1 : 0;
+      a.tcyCount = 2;
+      a.tcy[0] = static_cast<uint32_t>(b[2] | (b[3] << 8));
+      a.tcy[1] = static_cast<uint32_t>(b[4] | (b[5] << 8));
       break;
     }
     default:

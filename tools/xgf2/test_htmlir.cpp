@@ -1,6 +1,6 @@
 // c++ -std=c++20 -I lib/Typesetter -I lib/Utf8 \
 //   tools/xgf2/test_htmlir.cpp lib/Typesetter/HtmlSax.cpp lib/Typesetter/HtmlIR.cpp \
-//   lib/Utf8/Utf8.cpp -o /tmp/test_htmlir && /tmp/test_htmlir
+//   lib/Typesetter/FaceCss.cpp lib/Utf8/Utf8.cpp -o /tmp/test_htmlir && /tmp/test_htmlir
 
 #include "HtmlIR.h"
 
@@ -176,9 +176,15 @@ int main() {
       static_cast<Bag*>(ctx)->atoms.push_back(atom);
       return true;
     };
-    auto pic = [](void* ctx, const char* src) -> uint16_t {
+    auto pic = [](void* ctx, const char* src, uint16_t* w, uint16_t* h) -> uint16_t {
       if (!src || std::strcmp(src, "c.jpg") != 0) {
         return 0;
+      }
+      if (w) {
+        *w = 480;
+      }
+      if (h) {
+        *h = 800;
       }
       ++static_cast<Bag*>(ctx)->hits;
       return 4;
@@ -187,7 +193,8 @@ int main() {
     const char* html = "<html><body class=\"p-cover\"><img src=\"c.jpg\"/></body></html>";
     ts::AtomSink sink{&bag, emit, pic};
     ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
-    if (bag.hits != 1 || bag.atoms.size() != 1 || bag.atoms[0].kind != AtomKind::Picture || bag.atoms[0].cp != 4) {
+    if (bag.hits != 1 || bag.atoms.size() != 1 || bag.atoms[0].kind != AtomKind::Picture || bag.atoms[0].cp != 4 ||
+        bag.atoms[0].startEm != 1 || bag.atoms[0].tcy[0] != 480) {
       fail("cover picture");
     }
     bag.atoms.clear();
@@ -241,6 +248,33 @@ int main() {
     html = "<html><head><style>.calibre{writing-mode:horizontal-tb}</style></head><body><p>あ</p></body></html>";
     if (!ts::sniffWritingMode(html, std::strlen(html), mode) || mode != ts::WritingMode::HorizontalTb) {
       fail("sniff css");
+    }
+  }
+  {
+    const char* html =
+        "<html><head><style>span.big{font-size:150%} strong{font-weight:bold}</style></head>"
+        "<body><p><span class=\"big\">大</span><strong>太</strong></p></body></html>";
+    ts::FaceRule rules[8]{};
+    uint8_t nRules = 0;
+    ts::scanStyleTags(html, std::strlen(html), rules, nRules);
+    Dump d;
+    ts::AtomSink sink{&d, collect, nullptr, rules, nRules};
+    ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
+    const Atom* big = nullptr;
+    const Atom* bold = nullptr;
+    for (const Atom& a : d.atoms) {
+      if (a.kind == AtomKind::Ch && a.cp == 0x5927) {
+        big = &a;
+      }
+      if (a.kind == AtomKind::Ch && a.cp == 0x592A) {
+        bold = &a;
+      }
+    }
+    if (!big || big->startEm != 150 || (big->emphasis & ts::kEmphasisBold) != 0) {
+      fail("span.big 150%");
+    }
+    if (!bold || (bold->emphasis & ts::kEmphasisBold) == 0) {
+      fail("strong bold");
     }
   }
   std::printf("ok htmlir %s\n", "ruby/tcy/gaiji/group/em/img/heading");

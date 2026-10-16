@@ -303,6 +303,80 @@ struct PngHold {
 
 }  // namespace
 
+bool imagePixelSize(HalFile& image, uint16_t& w, uint16_t& h) {
+  w = 0;
+  h = 0;
+  uint8_t mag[8]{};
+  if (!image.seekSet(0) || image.read(mag, sizeof(mag)) != static_cast<int>(sizeof(mag))) {
+    image.seekSet(0);
+    return false;
+  }
+  const bool png = mag[0] == 0x89 && mag[1] == 'P' && mag[2] == 'N' && mag[3] == 'G';
+  const bool jpeg = mag[0] == 0xFF && mag[1] == 0xD8;
+  bool ok = false;
+  if (png) {
+    uint8_t dim[8]{};
+    if (image.seekSet(16) && image.read(dim, sizeof(dim)) == static_cast<int>(sizeof(dim))) {
+      const uint32_t W = (static_cast<uint32_t>(dim[0]) << 24) | (static_cast<uint32_t>(dim[1]) << 16) |
+                         (static_cast<uint32_t>(dim[2]) << 8) | dim[3];
+      const uint32_t H = (static_cast<uint32_t>(dim[4]) << 24) | (static_cast<uint32_t>(dim[5]) << 16) |
+                         (static_cast<uint32_t>(dim[6]) << 8) | dim[7];
+      if (W > 0 && H > 0 && W <= 65535u && H <= 65535u) {
+        w = static_cast<uint16_t>(W);
+        h = static_cast<uint16_t>(H);
+        ok = true;
+      }
+    }
+  } else if (jpeg && image.seekSet(2)) {
+    for (int step = 0; step < 80 && !ok; ++step) {
+      uint8_t one = 0;
+      if (image.read(&one, 1) != 1 || one != 0xFF) {
+        break;
+      }
+      do {
+        if (image.read(&one, 1) != 1) {
+          one = 0;
+          break;
+        }
+      } while (one == 0xFF);
+      const uint8_t marker = one;
+      if (marker == 0 || marker == 0xD9 || marker == 0xDA) {
+        break;
+      }
+      if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) {
+        continue;
+      }
+      uint8_t lb[2]{};
+      if (image.read(lb, 2) != 2) {
+        break;
+      }
+      const int len = (static_cast<int>(lb[0]) << 8) | lb[1];
+      if (len < 2) {
+        break;
+      }
+      const bool sof = marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
+      if (sof) {
+        uint8_t sofBuf[5]{};
+        if (image.read(sofBuf, sizeof(sofBuf)) == static_cast<int>(sizeof(sofBuf))) {
+          const uint32_t H = (static_cast<uint32_t>(sofBuf[1]) << 8) | sofBuf[2];
+          const uint32_t W = (static_cast<uint32_t>(sofBuf[3]) << 8) | sofBuf[4];
+          if (W > 0 && H > 0 && W <= 65535u && H <= 65535u) {
+            w = static_cast<uint16_t>(W);
+            h = static_cast<uint16_t>(H);
+            ok = true;
+          }
+        }
+        break;
+      }
+      if (!image.seekCur(len - 2)) {
+        break;
+      }
+    }
+  }
+  image.seekSet(0);
+  return ok;
+}
+
 bool PictureWriter::begin(const char* path, const uint16_t w, const uint16_t h, const bool append) {
   end();
   if (!path || w < 4 || h == 0 || (w % 4) != 0) {

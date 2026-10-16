@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FaceCss.h"
 #include "Layout.h"
 
 #include <cstddef>
@@ -10,8 +11,11 @@ namespace ts {
 struct AtomSink {
   void* ctx = nullptr;
   bool (*emit)(void* ctx, const Atom& atom, uint32_t pos) = nullptr;
-  // Full-page picture. Return a 1-based id, or 0 to keep a blank page break.
-  uint16_t (*picture)(void* ctx, const char* src) = nullptr;
+  // Store one image. Return a 1-based id, or 0 when it should become alt text.
+  // `w` and `h` receive the source pixel size (0 when unknown).
+  uint16_t (*picture)(void* ctx, const char* src, uint16_t* w, uint16_t* h) = nullptr;
+  const FaceRule* rules = nullptr;
+  uint8_t nRules = 0;
 };
 
 struct HtmlIRResult {

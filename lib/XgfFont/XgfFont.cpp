@@ -8,6 +8,7 @@
 #include <esp_heap_caps.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -295,11 +296,13 @@ bool XgfFont::initFaces() {
     freeFaces();
     return false;
   }
+  loadVert();
   facesReady = true;
   return true;
 }
 
 void XgfFont::freeFaces() {
+  clearVert();
   bodyFace.deinit();
   rubyFace.deinit();
   facesReady = false;
@@ -400,7 +403,7 @@ bool XgfFont::allocLru() {
   return true;
 }
 
-bool XgfFont::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest) {
+bool XgfFont::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest, const bool bold) {
   freeink::font::FtFont& face = ruby ? rubyFace : bodyFace;
   const uint8_t em = ruby ? rubyEmPx_ : emPx_;
   const uint16_t stride = slotStride(em);
@@ -408,7 +411,16 @@ bool XgfFont::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* des
   if (!facesReady || (ruby && !wantRuby)) {
     return false;
   }
+  freeink::font::FtFont::RenderOptions options;
+  options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  options.stemDarkening = true;
+  options.embolden26_6 = bold ? static_cast<int32_t>(em) * 4 : 0;
+  face.setRenderOptions(options);
   const freeink::font::GlyphBitmap* glyph = face.rasterizeGlyph26_6(bodyId, static_cast<uint32_t>(em) << 6);
+  if (bold) {
+    options.embolden26_6 = 0;
+    face.setRenderOptions(options);
+  }
   if (!glyph) {
     ++statFf;
     LOG_ERR("FONT", "raster %u %s failed (%d)", bodyId, ruby ? "ruby" : "body", face.lastGlyphError());
@@ -444,7 +456,7 @@ bool XgfFont::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) cons
   const Lru& t = ruby ? rubyLru : bodyLru;
   const uint8_t* slot = nullptr;
   for (uint16_t i = 0; i < t.used; ++i) {
-    if (t.entries[i].id == bodyId) {
+    if (t.entries[i].id == bodyId && t.entries[i].style == 0) {
       slot = t.pixels + static_cast<size_t>(i) * t.stride;
       break;
     }
@@ -489,14 +501,14 @@ XgfFont::CacheStats XgfFont::cacheStats() const {
   return s;
 }
 
-const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) {
+const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby, const uint8_t style) {
   if (!t.pixels || t.cap == 0) {
     return nullptr;
   }
   uint16_t victim = 0;
   uint16_t oldest = 0xFFFF;
   for (uint16_t i = 0; i < t.used; ++i) {
-    if (t.entries[i].id == bodyId) {
+    if (t.entries[i].id == bodyId && t.entries[i].style == style) {
       t.entries[i].recency = ++t.clock;
       if (t.clock == 0xFFFF) {
         for (uint16_t j = 0; j < t.used; ++j) {
@@ -522,23 +534,25 @@ const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) 
     slot = t.used++;
   }
   uint8_t* dest = t.pixels + static_cast<size_t>(slot) * t.stride;
-  if (!rasterizeSlot(bodyId, ruby, dest)) {
+  if (!rasterizeSlot(bodyId, ruby, dest, style != 0)) {
     t.entries[slot].id = 0xFFFF;
+    t.entries[slot].style = 0;
     if (slot == t.used - 1 && t.used > 0) {
       --t.used;
     }
     return nullptr;
   }
   t.entries[slot].id = bodyId;
+  t.entries[slot].style = style;
   t.entries[slot].recency = ++t.clock;
   return dest;
 }
 
-const uint8_t* XgfFont::cacheSlot(const uint16_t bodyId, const bool ruby) {
+const uint8_t* XgfFont::cacheSlot(const uint16_t bodyId, const bool ruby, const uint8_t style) {
   if (!bodyLru.pixels && !allocLru()) {
     return nullptr;
   }
-  return cacheIn(ruby ? rubyLru : bodyLru, bodyId, ruby);
+  return cacheIn(ruby ? rubyLru : bodyLru, bodyId, ruby, style);
 }
 
 void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool ruby) {
@@ -570,7 +584,7 @@ void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool 
     const Lru& table = ruby ? rubyLru : bodyLru;
     bool hit = false;
     for (uint16_t k = 0; k < table.used; ++k) {
-      if (table.entries[k].id == order[i]) {
+      if (table.entries[k].id == order[i] && table.entries[k].style == 0) {
         hit = true;
         break;
       }
@@ -586,8 +600,8 @@ void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool 
 }
 
 bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const bool ruby, const bool rotate90,
-                   const Plane plane) {
-  const uint8_t* slot = cacheSlot(bodyId, ruby);
+                   const Plane plane, const uint8_t style) {
+  const uint8_t* slot = cacheSlot(bodyId, ruby, style);
   if (!slot) {
     return false;
   }
@@ -787,4 +801,547 @@ int XgfFont::drawUtf8(Gfx& gfx, const int fontId, const int x, const int y, cons
     cursorX += adv;
   }
   return cursorX - x;
+}
+
+namespace {
+
+constexpr uint32_t kTagVert = 0x76657274u;
+constexpr uint32_t kTagVrt2 = 0x76727432u;
+constexpr int kMaxVertPairs = 4096;
+constexpr int kMaxVertSubs = 8;
+constexpr uint32_t kMaxGsubBytes = 1024u * 1024u;
+
+struct VertSet {
+  struct Sub {
+    uint16_t* from;
+    uint16_t* to;
+    uint16_t n;
+  };
+  Sub subs[kMaxVertSubs];
+  int nsubs;
+};
+
+struct VertPair {
+  uint16_t from;
+  uint16_t to;
+};
+
+struct GsubView {
+  const uint8_t* p;
+  size_t n;
+  bool u16(const size_t off, uint16_t& o) const {
+    if (off + 2 > n) {
+      return false;
+    }
+    o = static_cast<uint16_t>((p[off] << 8) | p[off + 1]);
+    return true;
+  }
+  bool u32(const size_t off, uint32_t& o) const {
+    if (off + 4 > n) {
+      return false;
+    }
+    o = (static_cast<uint32_t>(p[off]) << 24) | (static_cast<uint32_t>(p[off + 1]) << 16) |
+        (static_cast<uint32_t>(p[off + 2]) << 8) | p[off + 3];
+    return true;
+  }
+};
+
+uint32_t be32(const uint8_t* p) {
+  return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+         (static_cast<uint32_t>(p[2]) << 8) | p[3];
+}
+
+uint16_t be16(const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
+
+int cmpVertPair(const void* a, const void* b) {
+  const uint16_t fa = static_cast<const VertPair*>(a)->from;
+  const uint16_t fb = static_cast<const VertPair*>(b)->from;
+  if (fa < fb) {
+    return -1;
+  }
+  if (fa > fb) {
+    return 1;
+  }
+  return 0;
+}
+
+void freeVert(VertSet* v) {
+  if (!v) {
+    return;
+  }
+  for (int i = 0; i < v->nsubs; ++i) {
+    heap_caps_free(v->subs[i].from);
+    heap_caps_free(v->subs[i].to);
+  }
+  heap_caps_free(v);
+}
+
+bool pushVertPair(VertPair* pairs, int& n, const uint16_t from, const uint16_t to) {
+  if (from == 0 || from == to || n >= kMaxVertPairs) {
+    return n < kMaxVertPairs;
+  }
+  pairs[n].from = from;
+  pairs[n].to = to;
+  ++n;
+  return true;
+}
+
+template <typename Fn>
+bool eachCovered(const GsubView& g, const size_t off, Fn fn) {
+  uint16_t fmt = 0;
+  uint16_t count = 0;
+  if (!g.u16(off, fmt) || !g.u16(off + 2, count)) {
+    return false;
+  }
+  if (fmt == 1) {
+    for (uint16_t i = 0; i < count; ++i) {
+      uint16_t gid = 0;
+      if (!g.u16(off + 4 + static_cast<size_t>(i) * 2, gid)) {
+        return false;
+      }
+      fn(gid, i);
+    }
+    return true;
+  }
+  if (fmt == 2) {
+    for (uint16_t i = 0; i < count; ++i) {
+      const size_t rec = off + 4 + static_cast<size_t>(i) * 6;
+      uint16_t start = 0;
+      uint16_t end = 0;
+      uint16_t index = 0;
+      if (!g.u16(rec, start) || !g.u16(rec + 2, end) || !g.u16(rec + 4, index)) {
+        return false;
+      }
+      if (end < start) {
+        return false;
+      }
+      for (uint32_t gid = start; gid <= end; ++gid) {
+        fn(static_cast<uint16_t>(gid), static_cast<uint16_t>(index + (gid - start)));
+        if (gid == 0xFFFFu) {
+          break;
+        }
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+bool addVertSub(VertSet* set, VertPair* pairs, int n) {
+  if (n <= 0 || set->nsubs >= kMaxVertSubs) {
+    return false;
+  }
+  qsort(pairs, static_cast<size_t>(n), sizeof(VertPair), cmpVertPair);
+  int w = 0;
+  for (int i = 0; i < n; ++i) {
+    if (w > 0 && pairs[i].from == pairs[w - 1].from) {
+      continue;
+    }
+    pairs[w++] = pairs[i];
+  }
+  auto* from = static_cast<uint16_t*>(cacheAlloc(static_cast<size_t>(w) * sizeof(uint16_t)));
+  auto* to = static_cast<uint16_t*>(cacheAlloc(static_cast<size_t>(w) * sizeof(uint16_t)));
+  if (!from || !to) {
+    heap_caps_free(from);
+    heap_caps_free(to);
+    return false;
+  }
+  for (int i = 0; i < w; ++i) {
+    from[i] = pairs[i].from;
+    to[i] = pairs[i].to;
+  }
+  VertSet::Sub& sub = set->subs[set->nsubs];
+  sub.from = from;
+  sub.to = to;
+  sub.n = static_cast<uint16_t>(w);
+  ++set->nsubs;
+  return true;
+}
+
+bool parseSingle(const GsubView& g, const size_t off, VertSet* set, VertPair* pairs) {
+  uint16_t fmt = 0;
+  uint16_t cov = 0;
+  int n = 0;
+  if (!g.u16(off, fmt) || !g.u16(off + 2, cov)) {
+    return false;
+  }
+  if (fmt == 1) {
+    uint16_t deltaU = 0;
+    if (!g.u16(off + 4, deltaU)) {
+      return false;
+    }
+    const int16_t delta = static_cast<int16_t>(deltaU);
+    if (!eachCovered(g, off + cov, [&](const uint16_t gid, const uint16_t) {
+          const int to = static_cast<int>(gid) + static_cast<int>(delta);
+          if (to > 0 && to <= 0xFFFF) {
+            pushVertPair(pairs, n, gid, static_cast<uint16_t>(to));
+          }
+        })) {
+      return false;
+    }
+  } else if (fmt == 2) {
+    uint16_t count = 0;
+    if (!g.u16(off + 4, count)) {
+      return false;
+    }
+    if (!eachCovered(g, off + cov, [&](const uint16_t gid, const uint16_t index) {
+          uint16_t to = 0;
+          if (index < count && g.u16(off + 6 + static_cast<size_t>(index) * 2, to)) {
+            pushVertPair(pairs, n, gid, to);
+          }
+        })) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  if (n > 0) {
+    addVertSub(set, pairs, n);
+  }
+  return true;
+}
+
+void parseLookup(const GsubView& g, const size_t lookOff, VertSet* set, VertPair* pairs) {
+  uint16_t type = 0;
+  uint16_t nsub = 0;
+  if (!g.u16(lookOff, type) || !g.u16(lookOff + 4, nsub)) {
+    return;
+  }
+  for (uint16_t i = 0; i < nsub && set->nsubs < kMaxVertSubs; ++i) {
+    uint16_t rel = 0;
+    if (!g.u16(lookOff + 6 + static_cast<size_t>(i) * 2, rel)) {
+      return;
+    }
+    const size_t sub = lookOff + rel;
+    if (type == 1) {
+      parseSingle(g, sub, set, pairs);
+    } else if (type == 7) {
+      uint16_t extFmt = 0;
+      uint16_t extType = 0;
+      uint32_t extOff = 0;
+      if (!g.u16(sub, extFmt) || !g.u16(sub + 2, extType) || !g.u32(sub + 4, extOff)) {
+        continue;
+      }
+      if (extFmt == 1 && extType == 1) {
+        parseSingle(g, sub + extOff, set, pairs);
+      }
+    }
+  }
+}
+
+VertSet* buildVert(const uint8_t* buf, const size_t len) {
+  auto* set = static_cast<VertSet*>(cacheAlloc(sizeof(VertSet)));
+  auto* pairs = static_cast<VertPair*>(cacheAlloc(sizeof(VertPair) * kMaxVertPairs));
+  if (!set || !pairs) {
+    heap_caps_free(set);
+    heap_caps_free(pairs);
+    return nullptr;
+  }
+  memset(set, 0, sizeof(VertSet));
+  GsubView g{buf, len};
+  uint16_t scriptOff = 0;
+  uint16_t featOff = 0;
+  uint16_t lookOff = 0;
+  uint16_t featCount = 0;
+  uint16_t lookCount = 0;
+  if (!g.u16(4, scriptOff) || !g.u16(6, featOff) || !g.u16(8, lookOff) || !g.u16(featOff, featCount) ||
+      !g.u16(lookOff, lookCount)) {
+    heap_caps_free(pairs);
+    freeVert(set);
+    return nullptr;
+  }
+  (void)scriptOff;
+  int featIndex = -1;
+  for (uint16_t fi = 0; fi < featCount; ++fi) {
+    const size_t rec = static_cast<size_t>(featOff) + 2 + static_cast<size_t>(fi) * 6;
+    uint32_t tag = 0;
+    if (!g.u32(rec, tag)) {
+      break;
+    }
+    if (tag == kTagVert) {
+      featIndex = static_cast<int>(fi);
+      break;
+    }
+    if (tag == kTagVrt2 && featIndex < 0) {
+      featIndex = static_cast<int>(fi);
+    }
+  }
+  if (featIndex >= 0) {
+    const size_t rec = static_cast<size_t>(featOff) + 2 + static_cast<size_t>(featIndex) * 6;
+    uint16_t frel = 0;
+    uint16_t nlook = 0;
+    if (g.u16(rec + 4, frel) && g.u16(static_cast<size_t>(featOff) + frel + 2, nlook)) {
+      const size_t feature = static_cast<size_t>(featOff) + frel;
+      for (uint16_t li = 0; li < nlook && set->nsubs < kMaxVertSubs; ++li) {
+        uint16_t which = 0;
+        uint16_t lrel = 0;
+        if (!g.u16(feature + 4 + static_cast<size_t>(li) * 2, which)) {
+          break;
+        }
+        if (which >= lookCount || !g.u16(static_cast<size_t>(lookOff) + 2 + static_cast<size_t>(which) * 2, lrel)) {
+          continue;
+        }
+        parseLookup(g, static_cast<size_t>(lookOff) + lrel, set, pairs);
+      }
+    }
+  }
+  heap_caps_free(pairs);
+  if (set->nsubs == 0) {
+    freeVert(set);
+    return nullptr;
+  }
+  return set;
+}
+
+}  // namespace
+
+void XgfFont::clearVert() {
+  freeVert(static_cast<VertSet*>(vert));
+  vert = nullptr;
+}
+
+bool XgfFont::readFont(const uint32_t off, uint8_t* dst, const uint32_t n) {
+  if (n == 0) {
+    return true;
+  }
+  if (!dst) {
+    return false;
+  }
+  if (fileBytes) {
+    const uint32_t have = streamed ? prefixBytes : fileSize;
+    if (off <= have && n <= have - off) {
+      memcpy(dst, fileBytes + off, n);
+      return true;
+    }
+  }
+  if (!file.isOpen()) {
+    return false;
+  }
+  return streamRead(this, off, dst, n) == n;
+}
+
+void XgfFont::loadVert() {
+  clearVert();
+  uint8_t hdr[12]{};
+  if (!readFont(0, hdr, sizeof(hdr))) {
+    return;
+  }
+  uint32_t sfnt = 0;
+  if (hdr[0] == 't' && hdr[1] == 't' && hdr[2] == 'c' && hdr[3] == 'f') {
+    if (be32(hdr + 8) < 1) {
+      return;
+    }
+    uint8_t ent[4]{};
+    if (!readFont(12, ent, sizeof(ent))) {
+      return;
+    }
+    sfnt = be32(ent);
+  }
+  uint8_t sh[12]{};
+  if (!readFont(sfnt, sh, sizeof(sh))) {
+    return;
+  }
+  uint16_t nTables = be16(sh + 4);
+  if (nTables > 64) {
+    nTables = 64;
+  }
+  uint32_t off = 0;
+  uint32_t len = 0;
+  bool found = false;
+  for (uint16_t i = 0; i < nTables; ++i) {
+    uint8_t rec[16]{};
+    if (!readFont(sfnt + 12 + static_cast<uint32_t>(i) * 16, rec, sizeof(rec))) {
+      return;
+    }
+    if (rec[0] == 'G' && rec[1] == 'S' && rec[2] == 'U' && rec[3] == 'B') {
+      off = be32(rec + 8);
+      len = be32(rec + 12);
+      found = true;
+      break;
+    }
+  }
+  if (!found || len < 10 || len > kMaxGsubBytes) {
+    return;
+  }
+  const uint32_t have = fileBytes ? (streamed ? prefixBytes : fileSize) : 0;
+  const bool covered = fileBytes && off <= have && len <= have - off;
+  uint8_t* owned = nullptr;
+  const uint8_t* view = nullptr;
+  if (covered) {
+    view = fileBytes + off;
+  } else {
+    owned = static_cast<uint8_t*>(cacheAlloc(len));
+    if (!owned || !readFont(off, owned, len)) {
+      heap_caps_free(owned);
+      return;
+    }
+    view = owned;
+  }
+  vert = buildVert(view, len);
+  heap_caps_free(owned);
+  const auto* set = static_cast<const VertSet*>(vert);
+  if (set && set->nsubs > 0) {
+    LOG_INF("FONT", "vert subs %d", set->nsubs);
+  }
+}
+
+uint16_t XgfFont::vertOf(const uint16_t gid) const {
+  const auto* v = static_cast<const VertSet*>(vert);
+  if (!v || gid == 0) {
+    return gid;
+  }
+  uint16_t g = gid;
+  for (int s = 0; s < v->nsubs; ++s) {
+    const VertSet::Sub& sub = v->subs[s];
+    int lo = 0;
+    int hi = sub.n;
+    while (lo < hi) {
+      const int mid = lo + (hi - lo) / 2;
+      if (sub.from[mid] < g) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    if (lo < sub.n && sub.from[lo] == g) {
+      g = sub.to[lo];
+    }
+  }
+  return g;
+}
+
+int16_t XgfFont::advancePx(const uint32_t cp, const int px) {
+  if (!facesReady || px < 1) {
+    return 0;
+  }
+  int size = px;
+  if (size > 255) {
+    size = 255;
+  }
+  return bodyFace.advance(cp, static_cast<uint16_t>(size), 0);
+}
+
+bool XgfFont::blitCell(Gfx& gfx, const int x, const int y, const int cellW, const int cellH, const uint16_t bodyId,
+                       int px, const bool vertical, const bool bold, const bool rotate90, const bool yakumono,
+                       const Plane plane) {
+  if (plane != Plane::Ink) {
+    return true;
+  }
+  if (!facesReady || cellW < 1 || cellH < 1 || bodyId == 0 || bodyId == 0xFFFF) {
+    return false;
+  }
+  if (px < 1) {
+    px = 1;
+  }
+  if (px > 128) {
+    px = 128;
+  }
+  uint16_t gid = bodyId;
+  bool slide = false;
+  if (vertical) {
+    const uint16_t v = vertOf(gid);
+    if (v != 0 && v != gid) {
+      gid = v;
+      slide = true;
+    }
+  }
+  // A full em keeps the centered cache, including a separate bold entry.
+  if (!slide && !rotate90 && px == static_cast<int>(emPx_) && cellW == px && cellH == px) {
+    return blit(gfx, x, y, gid, false, false, plane, bold ? 1 : 0);
+  }
+
+  freeink::font::FtFont::RenderOptions options;
+  options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  options.stemDarkening = true;
+  options.embolden26_6 = bold ? px * 4 : 0;
+  bodyFace.setRenderOptions(options);
+  freeink::font::FtFont::LineMetrics lm{};
+  const bool haveLm = bodyFace.lineMetrics26_6(static_cast<uint32_t>(px) << 6, lm);
+  const freeink::font::GlyphBitmap* glyph = bodyFace.rasterizeGlyph26_6(gid, static_cast<uint32_t>(px) << 6);
+  options.embolden26_6 = 0;
+  bodyFace.setRenderOptions(options);
+  if (!glyph || !glyph->pixels || glyph->width == 0 || glyph->height == 0) {
+    return glyph != nullptr;
+  }
+
+  const uint8_t* bits = glyph->pixels;
+  int bw = glyph->width;
+  int bh = glyph->height;
+  uint8_t* turned = nullptr;
+  if (rotate90 && !slide && bw > 0 && bh > 0 && bw <= 128 && bh <= 128) {
+    const int rw = bh;
+    const int rh = bw;
+    turned = static_cast<uint8_t*>(cacheAlloc(static_cast<size_t>(rw) * static_cast<size_t>(rh)));
+    if (turned) {
+      memset(turned, 0, static_cast<size_t>(rw) * static_cast<size_t>(rh));
+      for (int gy = 0; gy < bh; ++gy) {
+        for (int gx = 0; gx < bw; ++gx) {
+          const int nx = bh - 1 - gy;
+          const int ny = gx;
+          turned[ny * rw + nx] = bits[gy * bw + gx];
+        }
+      }
+      bits = turned;
+      bw = rw;
+      bh = rh;
+    }
+  }
+
+  auto stamp = [&](const int ox, const int oy) {
+    for (int gy = 0; gy < bh; ++gy) {
+      const int dy = oy + gy;
+      if (dy < 0 || dy >= cellH) {
+        continue;
+      }
+      const uint8_t* row = bits + static_cast<size_t>(gy) * static_cast<size_t>(bw);
+      for (int gx = 0; gx < bw; ++gx) {
+        const int dx = ox + gx;
+        if (dx < 0 || dx >= cellW) {
+          continue;
+        }
+        if (quantize(row[gx]) == 0) {
+          continue;
+        }
+        gfx.drawPixel(x + dx, y + dy, true);
+      }
+    }
+  };
+
+  const bool center = !slide && (yakumono || rotate90 || turned || (cellW == px && cellH == px));
+  if (center || !haveLm) {
+    stamp((cellW - bw) / 2, (cellH - bh) / 2);
+    heap_caps_free(turned);
+    return true;
+  }
+
+  int ascent = static_cast<int>(lm.ascender26_6 >> 6);
+  int descent = static_cast<int>(-(lm.descender26_6 >> 6));
+  if (ascent < 0) {
+    ascent = 0;
+  }
+  if (descent < 0) {
+    descent = 0;
+  }
+  if (ascent + descent <= 0) {
+    stamp((cellW - bw) / 2, (cellH - bh) / 2);
+    heap_caps_free(turned);
+    return true;
+  }
+  const int boxW = slide ? px : cellW;
+  const int boxH = slide ? px : cellH;
+  const int pad = (boxH - (ascent + descent)) / 2;
+  int baseline = boxH - descent - pad;
+  if (slide && cellH < px) {
+    const int top = -glyph->yoff;
+    const int mid = top - static_cast<int>(glyph->height) / 2;
+    const int centerY = (ascent - descent) / 2;
+    if (mid < centerY) {
+      baseline -= px - cellH;
+    }
+  }
+  int adv = glyph->advance > 0 ? glyph->advance : px;
+  const int penX = (boxW - adv) / 2;
+  stamp(penX + glyph->xoff, baseline + glyph->yoff);
+  heap_caps_free(turned);
+  return true;
 }

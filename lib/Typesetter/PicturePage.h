@@ -45,4 +45,7 @@ class PictureWriter {
 // Copy one stored page into `dst` (pageW * pageH / 4 bytes). Id is 1-based.
 bool pictureRead(const char* path, uint16_t id, uint16_t pageW, uint16_t pageH, uint8_t* dst, size_t dstBytes);
 
+// JPEG SOF or PNG IHDR. Seeks back to the start. False when the size is unknown.
+bool imagePixelSize(HalFile& image, uint16_t& w, uint16_t& h);
+
 }  // namespace ts

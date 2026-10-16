@@ -8,11 +8,25 @@ namespace ts {
 namespace {
 
 void copyRuby(GlyphRun& run, const uint32_t* ruby, const uint8_t rubyCount) {
-  const uint8_t n = rubyCount > 4 ? 4 : rubyCount;
+  const uint8_t n = rubyCount > kMaxCluster ? kMaxCluster : rubyCount;
   run.rubyCount = n;
   for (uint8_t i = 0; i < n; ++i) {
     run.ruby[i] = ruby ? ruby[i] : 0;
   }
+}
+
+int16_t facePx(const LayoutOptions& opt, const uint8_t scale) {
+  if (scale == 0 || scale == 100) {
+    return opt.em;
+  }
+  int v = static_cast<int>(opt.em) * static_cast<int>(scale) / 100;
+  if (v < 1) {
+    v = 1;
+  }
+  if (v > 255) {
+    v = 255;
+  }
+  return static_cast<int16_t>(v);
 }
 
 }  // namespace
@@ -74,6 +88,15 @@ bool PageLayouter::recomputeGrid() {
     hanmenBottom = static_cast<int16_t>(firstLineY + usedH);
   }
   return true;
+}
+
+int16_t PageLayouter::charAdvance(const uint32_t cp, const bool tcy, const int16_t em) const {
+  const int16_t grid = kinsokuInlineAdvance(cp, em, tcy);
+  if (tcy || opt.mode != WritingMode::HorizontalTb || grid < em || usesEmAdvance(cp) || !opt.measure) {
+    return grid;
+  }
+  const int16_t w = opt.measure(opt.measureCtx, cp, em);
+  return w > 0 ? w : grid;
 }
 
 void PageLayouter::resetCursor() {
@@ -205,17 +228,138 @@ void PageLayouter::relocateTail(const uint16_t nIn, const bool vertical) {
   }
 }
 
-void PageLayouter::placeChar(const uint32_t cp, const uint32_t* ruby, const uint8_t rubyCount, const bool tcy,
-                             const uint8_t emphasis, const uint32_t* tcyCps, const uint8_t tcyN) {
-  const int16_t F = opt.em;
-  const int16_t h = kinsokuInlineAdvance(cp, F, tcy);
+namespace {
+
+void fitBox(const int sw, const int sh, int maxW, int maxH, int& dw, int& dh) {
+  if (maxW < 1) {
+    maxW = 1;
+  }
+  if (maxH < 1) {
+    maxH = 1;
+  }
+  dw = sw > 0 ? sw : 1;
+  dh = sh > 0 ? sh : 1;
+  if (dw > maxW || dh > maxH) {
+    if (static_cast<long long>(dw) * maxH <= static_cast<long long>(dh) * maxW) {
+      dh = maxH;
+      dw = static_cast<int>(static_cast<long long>(sw) * maxH / (sh > 0 ? sh : 1));
+    } else {
+      dw = maxW;
+      dh = static_cast<int>(static_cast<long long>(sh) * maxW / (sw > 0 ? sw : 1));
+    }
+  }
+  if (dw < 1) {
+    dw = 1;
+  }
+  if (dh < 1) {
+    dh = 1;
+  }
+  if (dw > maxW) {
+    dw = maxW;
+  }
+  if (dh > maxH) {
+    dh = maxH;
+  }
+}
+
+// A plate covers at least half the short side of the page. Anything smaller
+// shares the column with the text.
+bool staysInColumn(const int pxW, const int pxH, const int pageW, const int pageH) {
+  if (pxW < 1 || pxH < 1 || pageW < 1 || pageH < 1) {
+    return false;
+  }
+  const int longer = pxW > pxH ? pxW : pxH;
+  const int shorter = pageW < pageH ? pageW : pageH;
+  return longer * 2 <= shorter;
+}
+
+}  // namespace
+
+void PageLayouter::placePicture(const uint16_t id, const int pxW, const int pxH) {
+  const int em = opt.em > 0 ? opt.em : 1;
   const bool vert = opt.mode == WritingMode::VerticalRl;
+  int bw = 1;
+  int bh = 1;
+  if (vert) {
+    if (columnClosed) {
+      newColumn();
+    }
+    const int colH = colBottom > colTop ? colBottom - colTop : 1;
+    fitBox(pxW, pxH, em, colH, bw, bh);
+    if (y > indent && static_cast<int>(y) + bh > colBottom) {
+      newColumn();
+    }
+    const int room = colBottom - y;
+    if (room > 0 && bh > room) {
+      fitBox(pxW, pxH, em, room, bw, bh);
+    }
+    int px = static_cast<int>(colX) + (em - bw) / 2;
+    if (px < colX) {
+      px = colX;
+    }
+    GlyphRun run{};
+    run.cp = id;
+    run.size = static_cast<uint16_t>(bw);
+    run.advance = static_cast<uint16_t>(bh);
+    run.flags = kRunPicture;
+    run.ruby[0] = static_cast<uint32_t>(pxW > 0 ? pxW : 0);
+    run.ruby[1] = static_cast<uint32_t>(pxH > 0 ? pxH : 0);
+    run.x = static_cast<int16_t>(px);
+    run.y = y;
+    emit(run, feedPos);
+    y = static_cast<int16_t>(y + bh);
+    return;
+  }
+  if (columnClosed) {
+    newLine();
+  }
+  const int lineW = lineRight > hanmenLeft ? lineRight - hanmenLeft : 1;
+  fitBox(pxW, pxH, lineW, em, bw, bh);
+  if (x > indent && static_cast<int>(x) + bw > lineRight) {
+    newLine();
+  }
+  const int room = lineRight - x;
+  if (room > 0 && bw > room) {
+    fitBox(pxW, pxH, room, em, bw, bh);
+  }
+  int py = static_cast<int>(glyphY()) + (em - bh) / 2;
+  if (py < glyphY()) {
+    py = glyphY();
+  }
+  GlyphRun run{};
+  run.cp = id;
+  run.size = static_cast<uint16_t>(bw);
+  run.advance = static_cast<uint16_t>(bh);
+  run.flags = kRunPicture;
+  run.ruby[0] = static_cast<uint32_t>(pxW > 0 ? pxW : 0);
+  run.ruby[1] = static_cast<uint32_t>(pxH > 0 ? pxH : 0);
+  run.x = x;
+  run.y = static_cast<int16_t>(py);
+  emit(run, feedPos);
+  x = static_cast<int16_t>(x + bw);
+}
+
+void PageLayouter::placeChar(const uint32_t cp, const uint32_t* ruby, const uint8_t rubyCount, const bool tcy,
+                             const uint8_t emphasis, const uint32_t* tcyCps, const uint8_t tcyN, const uint8_t scale,
+                             const uint8_t bold) {
+  const int16_t F = facePx(opt, scale);
+  int16_t h = charAdvance(cp, tcy, F);
+  const bool vert = opt.mode == WritingMode::VerticalRl;
+  if (!vert && !tcy && ruby && rubyCount > 0) {
+    const int16_t rubyW = static_cast<int16_t>(rubyCount * (F / 2 > 0 ? F / 2 : 1));
+    if (rubyW > h) {
+      h = rubyW;
+    }
+  }
 
   auto fill = [&](GlyphRun& run) {
     run.cp = cp;
     run.size = static_cast<uint16_t>(F);
-    run.advance = static_cast<uint8_t>(h > 255 ? 255 : h);
-    run.emphasis = emphasis;
+    run.advance = static_cast<uint16_t>(h > 0 ? h : 0);
+    run.emphasis = static_cast<uint8_t>(emphasis & kEmphasisMask);
+    if (bold) {
+      run.flags = static_cast<uint8_t>(run.flags | kRunBold);
+    }
     if (tcy && tcyCps && tcyN > 0) {
       copyRuby(run, tcyCps, tcyN);
       run.cp = tcyCps[0];
@@ -223,7 +367,7 @@ void PageLayouter::placeChar(const uint32_t cp, const uint32_t* ruby, const uint
     } else if (ruby && rubyCount > 0) {
       copyRuby(run, ruby, rubyCount);
     }
-    if (h < F) {
+    if (h < F && kinsokuHalfAdvance(cp)) {
       run.flags = static_cast<uint8_t>(run.flags | kRunHalfCell);
     }
   };
@@ -305,17 +449,19 @@ void PageLayouter::placeChar(const uint32_t cp, const uint32_t* ruby, const uint
 }
 
 void PageLayouter::placeGroup(const Atom& atom) {
-  const int16_t F = opt.em;
+  const int16_t F = facePx(opt, atom.startEm);
+  const bool bold = (atom.emphasis & kEmphasisBold) != 0;
+  const uint8_t mark = static_cast<uint8_t>(atom.emphasis & kEmphasisMask);
   const bool vert = opt.mode == WritingMode::VerticalRl;
-  const uint8_t nBase = atom.tcyCount > 4 ? 4 : atom.tcyCount;
+  const uint8_t nBase = atom.tcyCount > kMaxCluster ? kMaxCluster : atom.tcyCount;
   if (nBase == 0) {
     return;
   }
-  const uint8_t nRuby = atom.rubyCount > 4 ? 4 : atom.rubyCount;
-  int16_t advs[4]{};
+  const uint8_t nRuby = atom.rubyCount > kMaxCluster ? kMaxCluster : atom.rubyCount;
+  int16_t advs[kMaxCluster]{};
   int16_t baseW = 0;
   for (uint8_t i = 0; i < nBase; ++i) {
-    advs[i] = kinsokuInlineAdvance(atom.tcy[i], F, false);
+    advs[i] = charAdvance(atom.tcy[i], false, F);
     baseW = static_cast<int16_t>(baseW + advs[i]);
   }
   const int16_t rubyUnit = static_cast<int16_t>(F / 2);
@@ -361,15 +507,18 @@ void PageLayouter::placeGroup(const Atom& atom) {
     GlyphRun run{};
     run.cp = atom.tcy[i];
     run.size = static_cast<uint16_t>(F);
-    run.advance = static_cast<uint8_t>(advs[i] > 255 ? 255 : advs[i]);
-    run.emphasis = atom.emphasis;
+    run.advance = static_cast<uint16_t>(advs[i] > 0 ? advs[i] : 0);
+    run.emphasis = mark;
+    if (bold) {
+      run.flags = static_cast<uint8_t>(run.flags | kRunBold);
+    }
     if (i == 0) {
       copyRuby(run, atom.ruby, nRuby);
       run.rubyLead = static_cast<uint8_t>(lead > 255 ? 255 : lead);
     } else {
       run.flags = static_cast<uint8_t>(run.flags | kRunSticky);
     }
-    if (advs[i] < F) {
+    if (advs[i] < F && kinsokuHalfAdvance(atom.tcy[i])) {
       run.flags = static_cast<uint8_t>(run.flags | kRunHalfCell);
     }
     if (!vert) {
@@ -401,8 +550,15 @@ bool PageLayouter::feed(const Atom& atom, const uint32_t atomPos) {
   deferredId = 0;
   switch (atom.kind) {
     case AtomKind::Picture: {
-      const uint16_t id = static_cast<uint16_t>(atom.cp);
+      const uint16_t id = static_cast<uint16_t>(atom.cp > 0xFFFFu ? 0xFFFFu : atom.cp);
       if (id == 0) {
+        break;
+      }
+      const bool havePx = atom.tcyCount >= 2 && atom.tcy[0] > 0 && atom.tcy[1] > 0;
+      const int pxW = havePx ? static_cast<int>(atom.tcy[0]) : 0;
+      const int pxH = havePx ? static_cast<int>(atom.tcy[1]) : 0;
+      if (atom.startEm == 0 && staysInColumn(pxW, pxH, opt.width, opt.height)) {
+        placePicture(id, pxW, pxH);
         break;
       }
       // One committed buffer. Glyphs already on this page stay a text page;
@@ -508,14 +664,17 @@ bool PageLayouter::feed(const Atom& atom, const uint32_t atomPos) {
         if (static_cast<int>(x) + need > lineRight && x > indent) {
           newLine();
         }
-        const uint8_t n = atom.tcyCount > 0 ? atom.tcyCount : 1;
+        const uint8_t n = atom.tcyCount > kMaxCluster ? kMaxCluster : (atom.tcyCount > 0 ? atom.tcyCount : 1);
+        const uint8_t mark = static_cast<uint8_t>(atom.emphasis & kEmphasisMask);
+        const uint8_t bold = (atom.emphasis & kEmphasisBold) != 0 ? 1 : 0;
         for (uint8_t i = 0; i < n; ++i) {
-          placeChar(i == 0 ? atom.cp : atom.tcy[i], nullptr, 0, false, atom.emphasis, nullptr, 0);
+          placeChar(i == 0 ? atom.cp : atom.tcy[i], nullptr, 0, false, mark, nullptr, 0, atom.startEm, bold);
         }
       } else {
-        const uint8_t n = atom.tcyCount > 0 ? atom.tcyCount : 1;
+        const uint8_t n = atom.tcyCount > kMaxCluster ? kMaxCluster : (atom.tcyCount > 0 ? atom.tcyCount : 1);
         const uint32_t* cps = atom.tcyCount > 0 ? atom.tcy : &atom.cp;
-        placeChar(atom.cp, nullptr, 0, true, atom.emphasis, cps, n);
+        placeChar(atom.cp, nullptr, 0, true, static_cast<uint8_t>(atom.emphasis & kEmphasisMask), cps, n, atom.startEm,
+                  (atom.emphasis & kEmphasisBold) != 0);
       }
       lastAtomPos = atomPos;
       break;
@@ -524,7 +683,8 @@ bool PageLayouter::feed(const Atom& atom, const uint32_t atomPos) {
       lastAtomPos = atomPos;
       break;
     case AtomKind::Ch:
-      placeChar(atom.cp, atom.ruby, atom.rubyCount, false, atom.emphasis, nullptr, 0);
+      placeChar(atom.cp, atom.ruby, atom.rubyCount, false, static_cast<uint8_t>(atom.emphasis & kEmphasisMask), nullptr,
+                0, atom.startEm, (atom.emphasis & kEmphasisBold) != 0);
       lastAtomPos = atomPos;
       break;
   }

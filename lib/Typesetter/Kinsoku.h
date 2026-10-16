@@ -10,9 +10,14 @@ bool shouldRotate(uint32_t cp);
 
 // 。、．， may sit past the 版面. Brackets do not.
 bool kinsokuHangs(uint32_t cp);
-// Small marks only. XGF ink is centered in the em, so a tall bracket
-// compressed to half an em would collide with its neighbors.
+// Brackets, ・, ：, and hanging 句読点. Half an em. The glyph is drawn on
+// the full em and slid so its ink sits in this shorter cell.
 bool kinsokuHalfAdvance(uint32_t cp);
+// Punctuation whose ink sits in a corner of the em. Center it in the cell.
+bool kinsokuYakumono(uint32_t cp);
+// CJK, kana, and fullwidth stay on the em grid. ASCII and Latin-1 use the
+// face advance in 横書き.
+bool usesEmAdvance(uint32_t cp);
 int16_t kinsokuInlineAdvance(uint32_t cp, int16_t em, bool tcy);
 
 inline bool isHiragana(const uint32_t cp) { return cp >= 0x3040 && cp <= 0x309F; }
