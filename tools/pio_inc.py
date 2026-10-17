@@ -1,6 +1,5 @@
 Import("env")
 
-# CCFLAGS are emitted before CPPPATH. typeset/src is on CPPPATH and has its
-# own TypesetBook.h, so this directory has to be searched first. The shared
-# EPUB opener also includes ts_picture.h from here.
+# CCFLAGS are emitted before CPPPATH. Epub.cpp includes "ts_picture.h" from
+# this directory, and that header includes the device PicturePage.h.
 env.Append(CCFLAGS=["-I" + env.subst("$PROJECT_DIR") + "/lib/Typesetter"])

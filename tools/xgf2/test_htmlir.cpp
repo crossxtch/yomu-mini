@@ -156,6 +156,100 @@ int main() {
     }
   }
   {
+    auto a = parse("<p><span class=\"em-dot\">点</span></p>");
+    if (a.size() != 1 || a[0].emphasis != ts::kEmDot) {
+      fail("em dot");
+    }
+  }
+  {
+    auto a = parse("<p><span class=\"em-sesame-open\">白</span></p>");
+    if (a.size() != 1 || a[0].emphasis != ts::kEmSesameOpen) {
+      fail("em sesame open");
+    }
+  }
+  {
+    const char* html =
+        "<html><head><style>"
+        "span.board{border:1px solid #000}"
+        "span.side{border-right:1px solid}"
+        "span.mark{text-emphasis:filled sesame}"
+        "em{text-emphasis:none}"
+        "em.em-dot{text-emphasis:circle}"
+        "</style></head><body><p id=\"here\">"
+        "<span class=\"board\">囲文</span>"
+        "<span class=\"side\">下</span>"
+        "<span class=\"mark\">点</span>"
+        "<em>強</em>"
+        "<em class=\"em-dot\">丸</em>"
+        "</p><a name=\"sec\">い</a></body></html>";
+    ts::FaceRule rules[8]{};
+    uint8_t nRules = 0;
+    ts::scanStyleTags(html, std::strlen(html), rules, nRules);
+    struct Hit {
+      std::vector<Atom> atoms;
+      char ids[4][40]{};
+      int nId = 0;
+    } hit;
+    auto emit = [](void* ctx, const Atom& atom, uint32_t) {
+      static_cast<Hit*>(ctx)->atoms.push_back(atom);
+      return true;
+    };
+    auto anchor = [](void* ctx, const char* id) {
+      auto* h = static_cast<Hit*>(ctx);
+      if (!id || h->nId >= 4) {
+        return;
+      }
+      std::snprintf(h->ids[h->nId], sizeof(h->ids[0]), "%s", id);
+      h->nId++;
+    };
+    ts::AtomSink sink{&hit, emit, nullptr, rules, nRules, anchor};
+    if (!ts::htmlToAtoms(html, std::strlen(html), sink, nullptr)) {
+      fail("marks html");
+    }
+    const Atom* box = nullptr;
+    const Atom* box2 = nullptr;
+    const Atom* mark = nullptr;
+    const Atom* em = nullptr;
+    const Atom* dot = nullptr;
+    const Atom* side = nullptr;
+    for (const Atom& a : hit.atoms) {
+      if (a.kind != AtomKind::Ch) {
+        continue;
+      }
+      if (a.cp == 0x56F2) {
+        box = &a;
+      } else if (a.cp == 0x6587) {
+        box2 = &a;
+      } else if (a.cp == 0x70B9) {
+        mark = &a;
+      } else if (a.cp == 0x5F37) {
+        em = &a;
+      } else if (a.cp == 0x4E38) {
+        dot = &a;
+      } else if (a.cp == 0x4E0B) {
+        side = &a;
+      }
+    }
+    if (!box || !box2 || box->box == 0 || box->box != box2->box) {
+      fail("board shares a box id");
+    }
+    if (!mark || (mark->emphasis & ts::kEmphasisMask) != ts::kEmSesame) {
+      fail("text-emphasis sesame");
+    }
+    if (!em || (em->emphasis & ts::kEmphasisMask) != ts::kEmSesame) {
+      fail("bare em ignores css none");
+    }
+    if (!dot || (dot->emphasis & ts::kEmphasisMask) != ts::kEmDot) {
+      fail("class dot wins over css circle");
+    }
+    if (!side || side->box != 0 || (side->emphasis & ts::kEmphasisMask) != ts::kEmLine) {
+      fail("one-sided border is a side line");
+    }
+    if (hit.nId != 2 || std::strcmp(hit.ids[0], "here") != 0 || std::strcmp(hit.ids[1], "sec") != 0) {
+      fail("anchor callback");
+    }
+  }
+  {
     auto a = parse("<p><img src=\"a.jpg\"/></p>");
     if (!a.empty()) {
       fail("img without alt became a page");

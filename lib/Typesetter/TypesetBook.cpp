@@ -113,6 +113,43 @@ void copyBasename(char* out, const size_t outSize, const char* path) {
   }
 }
 
+// Chapter titles are short. The name buffer is 80 bytes including the NUL.
+void appendHeadingCp(char* name, int& n, const uint32_t cp) {
+  unsigned char tmp[4];
+  int len = 0;
+  if (cp < 0x80) {
+    tmp[0] = static_cast<unsigned char>(cp);
+    len = 1;
+  } else if (cp < 0x800) {
+    tmp[0] = static_cast<unsigned char>(0xC0 | (cp >> 6));
+    tmp[1] = static_cast<unsigned char>(0x80 | (cp & 0x3F));
+    len = 2;
+  } else if (cp < 0x10000) {
+    if (cp >= 0xD800 && cp <= 0xDFFF) {
+      return;
+    }
+    tmp[0] = static_cast<unsigned char>(0xE0 | (cp >> 12));
+    tmp[1] = static_cast<unsigned char>(0x80 | ((cp >> 6) & 0x3F));
+    tmp[2] = static_cast<unsigned char>(0x80 | (cp & 0x3F));
+    len = 3;
+  } else if (cp <= 0x10FFFF) {
+    tmp[0] = static_cast<unsigned char>(0xF0 | (cp >> 18));
+    tmp[1] = static_cast<unsigned char>(0x80 | ((cp >> 12) & 0x3F));
+    tmp[2] = static_cast<unsigned char>(0x80 | ((cp >> 6) & 0x3F));
+    tmp[3] = static_cast<unsigned char>(0x80 | (cp & 0x3F));
+    len = 4;
+  } else {
+    return;
+  }
+  if (n < 0 || n + len >= 80) {
+    return;
+  }
+  for (int i = 0; i < len; ++i) {
+    name[n++] = static_cast<char>(tmp[i]);
+  }
+  name[n] = 0;
+}
+
 }  // namespace
 
 bool TypesetBook::hasBookExt(const char* path) {
@@ -221,7 +258,7 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
   }
   // A finished atom stays. A missing chapter sidecar used to force a full
   // reingest, which throws away a good TID7 (a long series is minutes).
-  if (epub && fresh && !cursorOk) {
+  if (fresh && !cursorOk) {
     if (!loadChapterSidecar()) {
       LOG_INF("TS", "No chapter sidecar");
     }
@@ -404,9 +441,40 @@ bool TypesetBook::ingestTxt() {
     error = "atom write";
     return false;
   }
+  // ColumnBreak.cp == 1 is an in-memory heading flag. The atom file does not store it.
+  chapterMarks.clear();
+  char heading[80]{};
+  int headingN = 0;
+  bool inHead = false;
+  uint32_t headingAt = 0;
+  constexpr int kMaxTextHeads = 64;
+  auto finishHead = [&]() {
+    if (!inHead) {
+      return;
+    }
+    inHead = false;
+    if (headingN <= 0 || static_cast<int>(chapterMarks.size()) >= kMaxTextHeads) {
+      return;
+    }
+    ChapterMark m;
+    m.atomOff = headingAt;
+    std::memcpy(m.name, heading, sizeof(m.name));
+    chapterMarks.push_back(m);
+  };
   ts::Atom a{};
   uint32_t pos = 0;
   while (r.next(a, pos)) {
+    if (a.kind == ts::AtomKind::ColumnBreak && a.cp == 1) {
+      finishHead();
+      inHead = true;
+      headingN = 0;
+      heading[0] = 0;
+      headingAt = w.position();
+    } else if (inHead && a.kind == ts::AtomKind::Ch) {
+      appendHeadingCp(heading, headingN, a.cp);
+    } else if (inHead && a.kind != ts::AtomKind::Space) {
+      finishHead();
+    }
     if (!w.write(a)) {
       error = w.diskFull() ? "disk full" : "atom write";
       w.close();
@@ -416,10 +484,14 @@ bool TypesetBook::ingestTxt() {
       return false;
     }
   }
+  finishHead();
   w.close();
   if (!font.reopenFile()) {
     error = "font maps";
     return false;
+  }
+  if (!chapterMarks.empty()) {
+    saveChapterSidecar();
   }
   return true;
 }
@@ -633,7 +705,7 @@ bool TypesetBook::atomCacheFresh() const {
     HalFile atom;
     uint32_t magic = 0;
     if (!Storage.openFileForRead("TS", atomPath, atom) || atom.read(&magic, 4) != 4 || magic != ts::kAtomMagic) {
-      return false;  // older atom magic; picture size is no longer in the record
+      return false;  // older than IRAB; picture size and 囲み罫 are not in the record
     }
   }
   // A cache-clear used to leave a file of page-breaks, about one byte each.

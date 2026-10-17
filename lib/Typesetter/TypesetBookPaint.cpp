@@ -164,6 +164,193 @@ int writeUtf8(const uint32_t cp, char* out) {
   return 1;
 }
 
+void pxInk(Gfx& gfx, const int x, const int y) { gfx.drawPixel(x, y, true); }
+
+void inkDot(Gfx& gfx, const int cx, const int cy, const int rad) {
+  const int r2 = rad * rad;
+  for (int dy = -rad; dy <= rad; ++dy) {
+    for (int dx = -rad; dx <= rad; ++dx) {
+      if (dx * dx + dy * dy <= r2) {
+        pxInk(gfx, cx + dx, cy + dy);
+      }
+    }
+  }
+}
+
+void inkRing(Gfx& gfx, const int cx, const int cy, int rad) {
+  if (rad < 2) {
+    rad = 2;
+  }
+  int thick = rad / 4;
+  if (thick < 1) {
+    thick = 1;
+  }
+  if (thick >= rad) {
+    thick = rad - 1;
+  }
+  const int inner = rad - thick;
+  const int outer2 = rad * rad;
+  const int inner2 = inner * inner;
+  for (int dy = -rad; dy <= rad; ++dy) {
+    for (int dx = -rad; dx <= rad; ++dx) {
+      const int d2 = dx * dx + dy * dy;
+      if (d2 <= outer2 && d2 > inner2) {
+        pxInk(gfx, cx + dx, cy + dy);
+      }
+    }
+  }
+}
+
+void inkTri(Gfx& gfx, const int cx, const int cy, int rad, const bool pointRight) {
+  if (rad < 1) {
+    rad = 1;
+  }
+  for (int dy = -rad; dy <= rad; ++dy) {
+    for (int dx = -rad; dx <= rad; ++dx) {
+      bool in = false;
+      if (pointRight) {
+        const int half = (rad - dx) / 2;
+        in = dy >= -half && dy <= half;
+      } else {
+        const int half = (rad + dy) / 2;
+        in = dx >= -half && dx <= half;
+      }
+      if (in) {
+        pxInk(gfx, cx + dx, cy + dy);
+      }
+    }
+  }
+}
+
+void inkFrame(Gfx& gfx, const int x, const int y, const int rw, const int rh, const int thick) {
+  if (rw <= 0 || rh <= 0 || thick <= 0) {
+    return;
+  }
+  if (thick * 2 >= rw || thick * 2 >= rh) {
+    gfx.fillRect(x, y, rw, rh, true);
+    return;
+  }
+  gfx.fillRect(x, y, rw, thick, true);
+  gfx.fillRect(x, y + rh - thick, rw, thick, true);
+  gfx.fillRect(x, y, thick, rh, true);
+  gfx.fillRect(x + rw - thick, y, thick, rh, true);
+}
+
+int markRad(const int em, const int num, const int den) {
+  int r = em * num / den;
+  if (r < 1) {
+    r = 1;
+  }
+  return r;
+}
+
+void paintMark(Gfx& gfx, const uint8_t kind, const int cx, const int cy, const int em, const bool vert) {
+  const int sesame = markRad(em, 1, 10);
+  const int dot = markRad(em, 8, 100);
+  const int circle = markRad(em, 14, 100);
+  switch (kind) {
+    case ts::kEmSesameOpen:
+      inkRing(gfx, cx, cy, sesame);
+      break;
+    case ts::kEmDot:
+      inkDot(gfx, cx, cy, dot);
+      break;
+    case ts::kEmDotOpen:
+      inkRing(gfx, cx, cy, dot);
+      break;
+    case ts::kEmCircle:
+      inkDot(gfx, cx, cy, circle);
+      break;
+    case ts::kEmCircleOpen:
+      inkRing(gfx, cx, cy, circle);
+      break;
+    case ts::kEmDoubleCircle:
+      inkRing(gfx, cx, cy, circle);
+      inkDot(gfx, cx, cy, markRad(circle, 36, 100));
+      break;
+    case ts::kEmDoubleCircleOpen:
+      inkRing(gfx, cx, cy, circle < 3 ? 3 : circle);
+      if (circle >= 4) {
+        inkRing(gfx, cx, cy, circle * 44 / 100);
+      }
+      break;
+    case ts::kEmTriangle:
+      inkTri(gfx, cx, cy, markRad(em, 11, 100), vert);
+      break;
+    default:
+      inkDot(gfx, cx, cy, sesame);
+      break;
+  }
+}
+
+void paintBoxes(Gfx& gfx, const ts::GlyphRun* runs, const uint16_t n, const int fallbackEm) {
+  for (uint16_t i = 0; i < n; ++i) {
+    const ts::GlyphRun& g = runs[i];
+    if (g.box == 0 || ts::runPicture(g)) {
+      continue;
+    }
+    const bool vert = !ts::runRubyAbove(g);
+    const int key = vert ? g.x : g.y;
+    bool earlier = false;
+    for (uint16_t j = 0; j < i; ++j) {
+      const ts::GlyphRun& o = runs[j];
+      if (o.box != g.box || ts::runPicture(o)) {
+        continue;
+      }
+      const bool ov = !ts::runRubyAbove(o);
+      if (ov == vert && (ov ? o.x : o.y) == key) {
+        earlier = true;
+        break;
+      }
+    }
+    if (earlier) {
+      continue;
+    }
+    int em = g.size > 0 ? static_cast<int>(g.size) : fallbackEm;
+    int minX = g.x;
+    int minY = g.y;
+    int maxX = g.x + (vert ? (g.size > 0 ? static_cast<int>(g.size) : em) : ts::runAdvance(g));
+    int maxY = g.y + (vert ? ts::runAdvance(g) : (g.size > 0 ? static_cast<int>(g.size) : em));
+    for (uint16_t j = static_cast<uint16_t>(i + 1); j < n; ++j) {
+      const ts::GlyphRun& o = runs[j];
+      if (o.box != g.box || ts::runPicture(o)) {
+        continue;
+      }
+      const bool ov = !ts::runRubyAbove(o);
+      if (ov != vert || (ov ? o.x : o.y) != key) {
+        continue;
+      }
+      const int oem = o.size > 0 ? static_cast<int>(o.size) : em;
+      if (o.x < minX) {
+        minX = o.x;
+      }
+      if (o.y < minY) {
+        minY = o.y;
+      }
+      const int ox = o.x + (ov ? (o.size > 0 ? static_cast<int>(o.size) : oem) : ts::runAdvance(o));
+      const int oy = o.y + (ov ? ts::runAdvance(o) : (o.size > 0 ? static_cast<int>(o.size) : oem));
+      if (ox > maxX) {
+        maxX = ox;
+      }
+      if (oy > maxY) {
+        maxY = oy;
+      }
+      if (oem > em) {
+        em = oem;
+      }
+    }
+    int outset = em * 12 / 100;
+    if (outset < 1) {
+      outset = 1;
+    }
+    int thick = em * 6 / 100;
+    if (thick < 1) {
+      thick = 1;
+    }
+    inkFrame(gfx, minX - outset, minY - outset, (maxX - minX) + outset * 2, (maxY - minY) + outset * 2, thick);
+  }
+}
+
 }  // namespace
 
 void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
@@ -281,7 +468,7 @@ void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
       if (gap < 1) {
         gap = 1;
       }
-      if (g.emphasis == 2) {
+      if (g.emphasis == ts::kEmLine) {
         int thick = em / 14;
         if (thick < 1) {
           thick = 1;
@@ -292,20 +479,9 @@ void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
           gfx.fillRect(g.x, g.y - gap - thick, adv, thick, true);
         }
       } else {
-        int rad = em / 10;
-        if (rad < 1) {
-          rad = 1;
-        }
         const int cx = vert ? g.x + em + gap : g.x + adv / 2;
         const int cy = vert ? g.y + adv / 2 : g.y - gap;
-        const int r2 = rad * rad;
-        for (int dy = -rad; dy <= rad; ++dy) {
-          for (int dx = -rad; dx <= rad; ++dx) {
-            if (dx * dx + dy * dy <= r2) {
-              gfx.drawPixel(cx + dx, cy + dy, true);
-            }
-          }
-        }
+        paintMark(gfx, g.emphasis, cx, cy, em, vert);
       }
     }
 
@@ -386,6 +562,7 @@ void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
       font.blit(gfx, rx, ry, rid, true, false, plane);
     }
   }
+  paintBoxes(gfx, loadedGlyphs, loadedCount, em);
 }
 
 void TypesetBook::logPaintedGlyphs(Gfx& gfx, const uint32_t pageIndex) const {
