@@ -18,8 +18,8 @@
 #include "network/FileTransferDetail.h"
 #include "network/html/FileManagerPage.h"
 
-#ifndef CROSSJP_VERSION
-#define CROSSJP_VERSION "dev"
+#ifndef YOMU_VERSION
+#define YOMU_VERSION "dev"
 #endif
 
 FileTransferServer::FileTransferServer() = default;
@@ -109,7 +109,7 @@ void FileTransferServer::handleRoot() const {
 void FileTransferServer::handleStatus() const {
   char json[256];
   snprintf(json, sizeof(json),
-           "{\"version\":\"" CROSSJP_VERSION
+           "{\"version\":\"" YOMU_VERSION
            "\",\"ip\":\"%s\",\"ssid\":\"%s\",\"freeHeap\":%lu,\"uptime\":%lu,\"utcOffsetQ\":%u}",
            WiFi.localIP().toString().c_str(), WiFi.SSID().c_str(), static_cast<unsigned long>(ESP.getFreeHeap()),
            static_cast<unsigned long>(millis() / 1000), settings.clockUtcOffsetQ);

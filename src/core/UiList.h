@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Gfx.h>
-#include <XgfFont.h>
+#include <ReadFace.h>
 
 #include "core/fontIds.h"
 
@@ -46,7 +46,7 @@ inline void drawMenuRow(Gfx& gfx, const int y, const int rowH, const char* label
 }
 
 inline void drawRow(Gfx& gfx, const int y, const int rowH, const char* label, const bool selected,
-                    XgfFont* cjk = nullptr) {
+                    ReadFace* cjk = nullptr) {
   if (selected) {
     gfx.fillRect(8, y - 2, gfx.width() - 16, rowH, true);
   }

@@ -10,7 +10,7 @@ class Gfx;
 // Reading face. A TrueType file on the SD card is rasterized on device into
 // fixed 2-bit em boxes and cached in PSRAM. The typesetter still blits those
 // boxes one em at a time.
-class XgfFont {
+class ReadFace {
  public:
   enum class Plane : uint8_t { Ink, Lsb, Msb };
 
@@ -23,11 +23,11 @@ class XgfFont {
   static constexpr uint8_t kEmPx = 40;
   static constexpr uint8_t kRubyEmPx = 20;
 
-  XgfFont() = default;
-  ~XgfFont() { close(); }
+  ReadFace() = default;
+  ~ReadFace() { close(); }
 
-  XgfFont(const XgfFont&) = delete;
-  XgfFont& operator=(const XgfFont&) = delete;
+  ReadFace(const ReadFace&) = delete;
+  ReadFace& operator=(const ReadFace&) = delete;
 
   bool load(const char* path, uint32_t lruMaxBytes = kLruBytes, bool wantRuby = true);
   void close();

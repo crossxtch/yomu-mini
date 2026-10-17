@@ -240,7 +240,7 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Crossjp Font")
+                Text("yomu")
                     .font(.title2.weight(.semibold))
                 Text("Make a reading font from a font on this Mac. The reader draws each character from this file, at one fixed size, in four gray levels.")
                     .foregroundStyle(.secondary)
@@ -314,7 +314,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Put the file on the reader from the Wi-Fi page, or copy it to the SD card at /.crossjp/fonts/. On the device, open 設定 → 本文フォント and choose it. The book lays out again at this size.")
+            Text("Put the file on the reader from the Wi-Fi page, or copy it to the SD card at /.yomu/fonts/. On the device, open 設定 → 本文フォント and choose it. The book lays out again at this size.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

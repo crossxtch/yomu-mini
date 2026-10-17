@@ -196,7 +196,7 @@ void TypesetBook::cursorPath(char* out, const size_t outSize) const {
     h ^= *p;
     h *= 16777619u;
   }
-  snprintf(out, outSize, "/.crossjp/s_%08lx.bin", static_cast<unsigned long>(h));
+  snprintf(out, outSize, "/.yomu/s_%08lx.bin", static_cast<unsigned long>(h));
 }
 
 void TypesetBook::dropPartialCache() {
@@ -635,7 +635,7 @@ bool TypesetBook::beginRange(const uint32_t origin, const uint16_t spine) {
   indexBufN = 0;
   char p[64];
   indexPath(p, sizeof(p));
-  Storage.ensureDirectoryExists("/.crossjp");
+  Storage.ensureDirectoryExists("/.yomu");
   if (!Storage.openFileForWrite("TS", p, indexFile)) {
     error = "index file";
     return false;

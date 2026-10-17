@@ -6,7 +6,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <TypesetBook.h>
-#include <XgfFont.h>
+#include <ReadFace.h>
 
 #include <cstdio>
 

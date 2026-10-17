@@ -34,7 +34,7 @@ final class Rasterizer {
         self.pixels = data.assumingMemoryBound(to: UInt8.self)
         ctx.setAllowsAntialiasing(true)
         ctx.setShouldAntialias(true)
-        // Same as cookxtch. Off, a 47px 明朝 stem loses about a quarter of its
+        // Same as the Mac typesetter. Off, a 47px 明朝 stem loses about a quarter of its
         // solid-black pixels and the page looks light.
         ctx.setShouldSmoothFonts(true)
         ctx.setAllowsFontSmoothing(true)

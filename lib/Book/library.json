@@ -1,10 +1,10 @@
 {
-  "name": "Typesetter",
+  "name": "Book",
   "version": "0.1.0",
   "dependencies": {
     "Miniz": "*",
     "ScratchHeap": "*",
-    "XgfFont": "*",
+    "ReadFace": "*",
     "FreeInkFont": "*",
     "hal": "*",
     "typeset": "*",

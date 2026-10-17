@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build Crossjp Font.app and run the encoder self-test. No device flash.
+# Build yomu.app and run the encoder self-test. No device flash.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 TARGET="arm64-apple-macosx13.0"
-APP="Crossjp Font.app"
+APP="yomu.app"
 
 echo "self-test"
 swiftc -swift-version 5 -O -sdk "$SDK" -target "$TARGET" \
@@ -39,6 +39,6 @@ echo "app"
 swiftc -swift-version 5 -O -sdk "$SDK" -target "$TARGET" \
   -framework SwiftUI -framework AppKit -framework CoreText -framework CoreGraphics -framework UniformTypeIdentifiers \
   Sources/XgfEncode.swift Sources/Rasterizer.swift Sources/FaceCatalog.swift Sources/ContentView.swift Sources/AppMain.swift \
-  -o "$APP/Contents/MacOS/CrossjpFont"
+  -o "$APP/Contents/MacOS/yomu"
 codesign --force --sign - "$APP"
 echo "built $(pwd)/$APP"

@@ -55,7 +55,7 @@ void WifiCredentialStore::load() {
 }
 
 void WifiCredentialStore::save() const {
-  Storage.ensureDirectoryExists("/.crossjp");
+  Storage.ensureDirectoryExists("/.yomu");
   HalFile f;
   if (!Storage.openFileForWrite("WIFI", kPath, f)) {
     LOG_ERR("WIFI", "Could not write %s", kPath);

@@ -2,7 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
-#include <XgfFont.h>
+#include <ReadFace.h>
 
 #include <cstdio>
 #include <cstring>
@@ -154,10 +154,10 @@ bool ReadingFont::setActive(const char* filename) {
   return true;
 }
 
-bool ReadingFont::loadUi(XgfFont& font) {
+bool ReadingFont::loadUi(ReadFace& font) {
   char path[192];
   if (!activePath(path, sizeof(path))) {
     return false;
   }
-  return font.load(path, XgfFont::kUiLruBytes, false);
+  return font.load(path, ReadFace::kUiLruBytes, false);
 }

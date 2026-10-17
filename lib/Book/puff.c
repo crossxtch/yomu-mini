@@ -4,7 +4,7 @@
  * For conditions of distribution and use, see copyright notice in puff.h
  * version 2.3, 21 Jan 2013
  *
- * Vendored into crossjp for EPUB zip inflation (see lib/Typesetter/Zip.cpp).
+ * Vendored into yomu for EPUB zip inflation (see lib/Book/Zip.cpp).
  * Upstream: https://github.com/madler/zlib/tree/master/contrib/puff
  * Altered: streaming input via puff_stream() so a zip member can inflate
  * from a small SD window instead of a second ~20-30 KB heap block.

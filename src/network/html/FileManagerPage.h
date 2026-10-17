@@ -9,7 +9,7 @@ static const char FILE_MANAGER_PAGE[] PROGMEM = R"HTML(<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0a0a0a">
-<title>crossjp file transfer</title>
+<title>yomu file transfer</title>
 <style>
 :root {
   --bg: #0a0a0a;
@@ -217,7 +217,7 @@ footer {
 <body>
 <div class="wrap">
   <div class="eyebrow">file transfer</div>
-  <h1>crossjp</h1>
+  <h1>yomu</h1>
   <nav id="path"></nav>
   <div id="dropZone">
     <div class="drop-kicker">upload</div>
@@ -250,7 +250,7 @@ footer {
     </div>
   </section>
   <div id="status"></div>
-  <footer id="foot">crossjp</footer>
+  <footer id="foot">yomu</footer>
 </div>
 <script>
 let path = "/";
@@ -708,7 +708,7 @@ tzSelect.onchange = () => {
 };
 
 fetch("/api/status").then(r => r.json()).then(s => {
-  const bits = ["crossjp"];
+  const bits = ["yomu"];
   if (s.version) bits.push(s.version);
   if (s.ssid) bits.push(s.ssid);
   if (s.ip) bits.push(s.ip);

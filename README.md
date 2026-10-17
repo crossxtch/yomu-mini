@@ -1,6 +1,6 @@
-# crossjp
+# yomu
 
-EPUB and plain-text reader for the Xteink X4 Classic. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
+EPUB and plain-text reader for the Xteink X4 Classic. This checkout is `yomu-mini`. On the device the name is yomu. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
 
 The panel is 800×480 landscape. UI and pages are 480×800 portrait. Book opening and page layout come from the sibling `typeset` repo.
 
@@ -13,14 +13,14 @@ src/screens/          home, browser, reader, chapters, settings, update
 src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
-lib/Typesetter        X4 session, 2-bit paint, and the picture sidecar
-lib/XgfFont           on-device TrueType rasterizer
+lib/Book              book session, 2-bit paint, and the picture sidecar
+lib/ReadFace          TrueType glyphs cached as 2-bit em boxes
 lib/EpdFont           Ubuntu UI fonts
 reference/            CrossPoint submodule (lookup only)
 freeink-sdk/          display and board support
 ```
 
-Settings and per-book progress live in `/.crossjp` on the SD card.
+Settings, fonts, and per-book progress live in `/.yomu` on the SD card. A card that still has `/.crossjp` is renamed to `/.yomu` on boot.
 Boot and runtime logs go to the Serial console only (no SD log file).
 
 Firmware update from SD (same idea as CrossPoint):
@@ -28,7 +28,7 @@ Firmware update from SD (same idea as CrossPoint):
 - Settings → **Update firmware** → pick a `.bin` → confirm.
 - Recovery picker: hold **Down + Power** at wake (side-right + power). Side-left is GPIO0, a boot strap. Back returns to home.
 
-Reading fonts are TrueType files (`.ttf`, `.otf`, `.ttc`) under `/.crossjp/fonts/`. The device rasterizes them. The FreeType build has no CFF driver, so a CFF OpenType such as Hiragino Mincho will not open. Use a TrueType or TrueType-collection face. Face index 0 of a `.ttc` is used.
+Reading fonts are TrueType files (`.ttf`, `.otf`, `.ttc`) under `/.yomu/fonts/`. The device rasterizes them. The FreeType build has no CFF driver, so a CFF OpenType such as Hiragino Mincho will not open. Use a TrueType or TrueType-collection face. Face index 0 of a `.ttc` is used.
 
 The stock Xteink updater is gone once this firmware is installed.
 
@@ -44,14 +44,14 @@ pio device monitor
 
 ## Release
 
-Bump `[crossjp] version` in `platformio.ini` to match the tag, push `develop`, then:
+Bump `[yomu] version` in `platformio.ini` to match the tag, push `develop`, then:
 
 ```bash
 git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-GitHub Actions builds `crossjp-x4c.bin` and attaches it to a GitHub Release for that tag.
+GitHub Actions builds `yomu-x4c.bin` and attaches it to a GitHub Release for that tag.
 
 Optional `platformio.local.ini` for a local upload port (gitignored).
 

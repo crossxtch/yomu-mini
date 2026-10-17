@@ -9,7 +9,7 @@ HalGPIO gpio;
 
 void HalGPIO::begin() {
 #if !FREEINK_DEVICE_X4CLASSIC
-#error "crossjp builds for the X4 Classic only (-DFREEINK_DEVICE_X4CLASSIC=1)."
+#error "yomu builds for the X4 Classic only (-DFREEINK_DEVICE_X4CLASSIC=1)."
 #endif
   BoardConfig::selectDevice(BoardConfig::Board::XteinkX4Classic);
   // SSD1677 / UC8179 / UC8279, from the panel VER register, before the display

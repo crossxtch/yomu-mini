@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ChapterInfo.h>
-#include <XgfFont.h>
+#include <ReadFace.h>
 
 #include <vector>
 
@@ -18,8 +18,8 @@ class ChapterSelectionScreen final : public Screen {
   uint16_t pageCount;
   int index = 0;
   int window = 0;
-  XgfFont owned;
-  XgfFont* face = nullptr;
+  ReadFace owned;
+  ReadFace* face = nullptr;
 
   void activate();
 

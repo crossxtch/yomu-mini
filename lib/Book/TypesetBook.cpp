@@ -54,7 +54,7 @@ uint32_t fileSizeOf(const char* path) {
 }
 
 void atomCacheName(char* out, const size_t outSize, const unsigned long hash, const char tag) {
-  snprintf(out, outSize, "/.crossjp/%c_%08lx.bin", tag, hash);
+  snprintf(out, outSize, "/.yomu/%c_%08lx.bin", tag, hash);
 }
 
 // Truncate or create `path`. A stuck exFAT directory entry (bitmap already
@@ -157,11 +157,11 @@ bool TypesetBook::hasBookExt(const char* path) {
 }
 
 void TypesetBook::indexPath(char* out, const size_t outSize) const {
-  snprintf(out, outSize, "/.crossjp/t_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
+  snprintf(out, outSize, "/.yomu/t_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
 }
 
 void TypesetBook::chapterPath(char* out, const size_t outSize) const {
-  snprintf(out, outSize, "/.crossjp/c_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
+  snprintf(out, outSize, "/.yomu/c_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
 }
 
 bool TypesetBook::loadFont(const char* fontPath) {
@@ -212,7 +212,7 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
     if (!ctx || em <= 0) {
       return 0;
     }
-    return static_cast<XgfFont*>(ctx)->advancePx(cp, em);
+    return static_cast<ReadFace*>(ctx)->advancePx(cp, em);
   };
   layoutOpt.measureCtx = &font;
 
@@ -221,8 +221,8 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
   char alt[64];
   atomCacheName(primary, sizeof(primary), hash, 'a');
   atomCacheName(alt, sizeof(alt), hash, 'b');
-  snprintf(picturePath, sizeof(picturePath), "/.crossjp/i_%08lx.bin", hash);
-  Storage.ensureDirectoryExists("/.crossjp");
+  snprintf(picturePath, sizeof(picturePath), "/.yomu/i_%08lx.bin", hash);
+  Storage.ensureDirectoryExists("/.yomu");
 
   bookSrcSize = fileSizeOf(filepath);
   const uint32_t primarySize = fileSizeOf(primary);

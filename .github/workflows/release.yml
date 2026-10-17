@@ -1,7 +1,7 @@
 name: Release
 
-# Push a tag like v0.1.0 (must match [crossjp] version in platformio.ini).
-# Builds x4c and attaches crossjp-x4c.bin to a GitHub Release.
+# Push a tag like v0.1.0 (must match [yomu] version in platformio.ini).
+# Builds x4c and attaches yomu-x4c.bin to a GitHub Release.
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
       matrix:
         include:
           - pio_env: x4c
-            asset: crossjp-x4c.bin
+            asset: yomu-x4c.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -78,10 +78,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTES: |
-            Download `crossjp-x4c.bin` for the Xteink X4 Classic (480×800 pages). Copy it to the SD card, then Settings → Update firmware (or hold Down + Power at wake).
+            Download `yomu-x4c.bin` for the Xteink X4 Classic (480×800 pages). Copy it to the SD card, then Settings → Update firmware (or hold Down + Power at wake).
         run: |
           gh release create "${{ github.ref_name }}" \
-            dist/crossjp-x4c.bin \
+            dist/yomu-x4c.bin \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \

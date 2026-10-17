@@ -24,8 +24,8 @@
 #include "core/fontIds.h"
 #include "network/WifiCredentialStore.h"
 
-#ifndef CROSSJP_VERSION
-#define CROSSJP_VERSION "dev"
+#ifndef YOMU_VERSION
+#define YOMU_VERSION "dev"
 #endif
 
 // FreeType face open and the scan converter share this task with EPUB inflate.
@@ -56,16 +56,22 @@ static const char* wakeupName(HalGPIO::WakeupReason reason) {
   }
 }
 
-// Cards written by the previous firmware name keep settings, fonts, and caches.
+// A card from an older directory name still opens.
 static void migrateDataDir() {
-  constexpr const char* kOld = "/.crossxtch";
-  if (Storage.exists(Settings::kDir) || !Storage.exists(kOld)) {
+  if (Storage.exists(Settings::kDir)) {
     return;
   }
-  if (Storage.rename(kOld, Settings::kDir)) {
-    LOG_INF("MAIN", "Renamed %s -> %s", kOld, Settings::kDir);
-  } else {
-    LOG_ERR("MAIN", "Could not rename %s -> %s", kOld, Settings::kDir);
+  const char* previous[] = {"/.crossjp", "/.crossxtch"};
+  for (const char* old : previous) {
+    if (!Storage.exists(old)) {
+      continue;
+    }
+    if (Storage.rename(old, Settings::kDir)) {
+      LOG_INF("MAIN", "Renamed %s -> %s", old, Settings::kDir);
+    } else {
+      LOG_ERR("MAIN", "Could not rename %s -> %s", old, Settings::kDir);
+    }
+    return;
   }
 }
 
@@ -98,7 +104,7 @@ void setup() {
   halClock.begin();
 
   const auto wakeupReason = gpio.getWakeupReason();
-  LOG_INF("MAIN", "crossjp " CROSSJP_VERSION " board=%s wake=%s bat=%u%% panic=%d", BoardConfig::ACTIVE.name,
+  LOG_INF("MAIN", "yomu " YOMU_VERSION " board=%s wake=%s bat=%u%% panic=%d", BoardConfig::ACTIVE.name,
           wakeupName(wakeupReason), static_cast<unsigned>(powerManager.getBatteryPercentage()),
           HalSystem::isRebootFromPanic() ? 1 : 0);
 

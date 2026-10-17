@@ -1,6 +1,6 @@
 ---
 name: scope-discipline
-description: "Feature-scope discipline for the crossjp e-reader. Use when adding a feature, a new screen, a new lib, a setting, or a dependency, or when a request would grow the firmware's surface. Covers the product boundary, the RAM-cost vs reading-benefit gate, preferring no-code or existing-mechanism solutions, and how to push back on out-of-scope asks."
+description: "Feature-scope discipline for the yomu-mini e-reader. Use when adding a feature, a new screen, a new lib, a setting, or a dependency, or when a request would grow the firmware's surface. Covers the product boundary, the RAM-cost vs reading-benefit gate, preferring no-code or existing-mechanism solutions, and how to push back on out-of-scope asks."
 ---
 
 # Scope Discipline

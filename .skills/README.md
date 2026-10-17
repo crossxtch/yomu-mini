@@ -1,4 +1,4 @@
-# crossjp: project skills
+# yomu-mini: project skills
 
 On-demand Agent Skills for this repository. Compatible agents load one when the
 task matches its `description`; you do not invoke them by hand. They encode how
@@ -9,10 +9,11 @@ These are written for capable agents, not beginners. They are principle- and
 decision-focused on purpose. They deliberately avoid line-number citations,
 which drift; they anchor on durable names (APIs, types, macros, files).
 
-crossjp is the on-device EPUB and plain-text reader for the Xteink X4 Classic.
+This checkout is the X4 Classic firmware. The product name is yomu.
 `src/screens/` is the UI, `src/core/` is the screen stack and settings,
 `src/network/` is Wi-Fi and file transfer, `lib/hal/` wraps the board,
-`lib/Typesetter/` lays out a book, and `lib/Gfx/` is the portrait framebuffer.
+`lib/Book/` is the book session and the 2-bit paint, and `lib/Gfx/` is the
+portrait framebuffer. Page layout comes from the sibling `typeset` repo.
 
 Each skill is a directory containing `SKILL.md` whose `name` matches the directory.
 

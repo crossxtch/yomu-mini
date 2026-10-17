@@ -119,7 +119,7 @@ bool endsWithIgnoreCase(const char* s, size_t n, const char* ext) {
   return true;
 }
 
-// Final path for an upload. Fonts always land in /.crossjp/fonts.
+// Final path for an upload. Fonts always land in /.yomu/fonts.
 bool resolveUploadDest(const char* dir, const char* name, std::string& dest) {
   if (!name || name[0] == '\0' || strchr(name, '/') || strchr(name, '\\')) {
     return false;

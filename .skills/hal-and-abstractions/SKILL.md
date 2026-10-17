@@ -8,7 +8,7 @@ description: "Layering and abstraction discipline for the firmware. Use when tou
 ## Route through the layer, always
 
 - **SD card I/O:** `Storage` (`HalStorage`) and `HalFile`. Never `SdFat`,
-  `FsFile`, or `SDCardManager` from `src/` or from `lib/Typesetter`. The HAL
+  `FsFile`, or `SDCardManager` from `src/` or from `lib/Book`. The HAL
   serializes every SD access through one mutex; bypassing it races the card
   and panics FreeRTOS. `lib/SDCardManager` is the vendored place
   those types live. `lib/EInkDisplay` is the same kind of vendor drop: patch it

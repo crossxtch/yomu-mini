@@ -1,9 +1,9 @@
 import SwiftUI
 
 @main
-struct CrossjpFontApp: App {
+struct YomuFontApp: App {
     var body: some Scene {
-        WindowGroup("Crossjp Font") {
+        WindowGroup("yomu") {
             ContentView()
         }
         .defaultSize(width: 680, height: 640)

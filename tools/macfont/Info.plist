@@ -5,13 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>CrossjpFont</string>
+	<string>yomu</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.crossjp.fontmaker</string>
+	<string>com.yomu.fontmaker</string>
 	<key>CFBundleDisplayName</key>
-	<string>Crossjp Font</string>
+	<string>yomu</string>
 	<key>CFBundleName</key>
-	<string>Crossjp Font</string>
+	<string>yomu</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,9 +26,9 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.crossjp.xgf2</string>
+			<string>com.yomu.xgf2</string>
 			<key>UTTypeDescription</key>
-			<string>crossjp reading font</string>
+			<string>yomu reading font</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>

@@ -17,8 +17,8 @@
 #include "core/fontIds.h"
 #include "screens/FontsScreen.h"
 
-#ifndef CROSSJP_VERSION
-#define CROSSJP_VERSION "dev"
+#ifndef YOMU_VERSION
+#define YOMU_VERSION "dev"
 #endif
 
 namespace {
@@ -229,6 +229,6 @@ void SettingsScreen::render() {
     ui::drawMenuRow(gfx, startY + i * rowH, rowH, labels[i], i == index);
   }
 
-  gfx.drawCenteredText(FONT_UI, gfx.height() - 40, "crossjp " CROSSJP_VERSION);
+  gfx.drawCenteredText(FONT_UI, gfx.height() - 40, "yomu " YOMU_VERSION);
   presentUi();
 }

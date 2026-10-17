@@ -1,6 +1,6 @@
 #pragma once
 
-#include <XgfFont.h>
+#include <ReadFace.h>
 
 #include <cstdint>
 #include <vector>
@@ -50,7 +50,7 @@ class TypesetBook {
 
   // Recomputes page ranges for chapters whose atoms are already indexed.
   const std::vector<ts::ChapterInfo>& getChapters();
-  XgfFont* cjkFont() { return font.loaded() ? &font : nullptr; }
+  ReadFace* cjkFont() { return font.loaded() ? &font : nullptr; }
 
   bool drawPage(Gfx& gfx, uint32_t pageIndex, int& pagesUntilFullRefresh, int refreshFrequency);
   void prefetchForward(uint32_t fromPageIndex);
@@ -74,14 +74,14 @@ class TypesetBook {
   static constexpr uint32_t kFlagFrozen = 8u;
   static constexpr uint32_t kCursorMagic = 0x314E5053u;
   static constexpr uint16_t kMaxPages = 65535;
-  static constexpr const char* kWorkIndex = "/.crossjp/work.idx";
+  static constexpr const char* kWorkIndex = "/.yomu/work.idx";
 
   char filepath[256]{};
   char bookTitle[128]{};
   char atomPath[64]{};
   char picturePath[64]{};
   const char* error = "not open";
-  XgfFont font;
+  ReadFace font;
   ts::AtomReader atoms;
   ts::PageLayouter layouter;
   ts::LayoutOptions layoutOpt{};
@@ -162,7 +162,7 @@ class TypesetBook {
   // Fill in-memory picture size before feed. The atom file stores only the id.
   void preparePicture(ts::Atom& atom) const;
   bool layoutPage(uint32_t pageIndex);
-  void paint(Gfx& gfx, XgfFont::Plane plane);
+  void paint(Gfx& gfx, ReadFace::Plane plane);
   void logPaintedGlyphs(Gfx& gfx, uint32_t pageIndex) const;
   void indexPath(char* out, size_t outSize) const;
   void chapterPath(char* out, size_t outSize) const;

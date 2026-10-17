@@ -1,6 +1,6 @@
 #pragma once
 
-#include <XgfFont.h>
+#include <ReadFace.h>
 
 #include <string>
 #include <vector>
@@ -18,7 +18,7 @@ class BrowserScreen final : public Screen {
   int window = 0;
   uint8_t shownMinute = 255;
   Mode mode = Mode::Books;
-  XgfFont cjk;
+  ReadFace cjk;
 
   void load();
   void activate();

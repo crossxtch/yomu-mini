@@ -1,4 +1,4 @@
-#include "XgfFont.h"
+#include "ReadFace.h"
 
 #include <EpdFontFamily.h>
 #include <FontAlloc.h>
@@ -51,8 +51,8 @@ void putPixel(uint8_t* slot, const uint8_t em, const int x, const int y, const u
 // 0 paper, 1 light, 2 dark, 3 black. Ink is every non-paper pixel. Gray planes
 // stay clear: a marked gray pixel is driven instead of holding the black the
 // base frame just painted, and on a reading face those pixels are the stem.
-bool planeKeep(const uint8_t v, const XgfFont::Plane plane) {
-  return plane == XgfFont::Plane::Ink && v >= kInkThreshold;
+bool planeKeep(const uint8_t v, const ReadFace::Plane plane) {
+  return plane == ReadFace::Plane::Ink && v >= kInkThreshold;
 }
 
 void paintRowBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, int nBits, const bool black) {
@@ -93,7 +93,7 @@ void paintRowBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, in
   }
 }
 
-void fillRowMask(uint8_t* mask, const uint8_t* src, const uint8_t em, const int rowBytes, const XgfFont::Plane plane) {
+void fillRowMask(uint8_t* mask, const uint8_t* src, const uint8_t em, const int rowBytes, const ReadFace::Plane plane) {
   memset(mask, 0, 8);
   int gx = 0;
   for (int b = 0; b < rowBytes && gx < em; ++b) {
@@ -128,9 +128,9 @@ uint16_t capFor(const uint32_t budget, const uint16_t stride) {
 
 }  // namespace
 
-unsigned long XgfFont::streamRead(void* ctx, const unsigned long offset, unsigned char* buffer,
+unsigned long ReadFace::streamRead(void* ctx, const unsigned long offset, unsigned char* buffer,
                                   const unsigned long count) {
-  auto* self = static_cast<XgfFont*>(ctx);
+  auto* self = static_cast<ReadFace*>(ctx);
   if (count == 0) {
     return 0;
   }
@@ -156,7 +156,7 @@ unsigned long XgfFont::streamRead(void* ctx, const unsigned long offset, unsigne
   return done;
 }
 
-bool XgfFont::load(const char* path, const uint32_t lruMaxBytes, const bool wantRubyMap) {
+bool ReadFace::load(const char* path, const uint32_t lruMaxBytes, const bool wantRubyMap) {
   close();
   lruLimit = lruMaxBytes ? lruMaxBytes : kLruBytes;
   wantRuby = wantRubyMap;
@@ -189,7 +189,7 @@ bool XgfFont::load(const char* path, const uint32_t lruMaxBytes, const bool want
   return true;
 }
 
-void XgfFont::close() {
+void ReadFace::close() {
   opened = false;
   freeFaces();
   freeBytes();
@@ -203,13 +203,13 @@ void XgfFont::close() {
   statSdReads = statSdBytes = statSdUs = 0;
 }
 
-void XgfFont::releaseFile() {
+void ReadFace::releaseFile() {
   if (file.isOpen()) {
     file.close();
   }
 }
 
-bool XgfFont::reopenFile() {
+bool ReadFace::reopenFile() {
   if (!streamed) {
     return fileBytes != nullptr;
   }
@@ -227,7 +227,7 @@ bool XgfFont::reopenFile() {
   return true;
 }
 
-bool XgfFont::loadBytes() {
+bool ReadFace::loadBytes() {
   const size_t spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
   streamed = fileSize > kResidentMax || spiram < static_cast<size_t>(fileSize) + 256 * 1024;
   if (!streamed) {
@@ -263,19 +263,19 @@ bool XgfFont::loadBytes() {
   return true;
 }
 
-void XgfFont::freeBytes() {
+void ReadFace::freeBytes() {
   fiFontFree(fileBytes);
   fileBytes = nullptr;
   prefixBytes = 0;
 }
 
-bool XgfFont::initFaces() {
+bool ReadFace::initFaces() {
   freeink::font::FtFont::RenderOptions options;
   options.hinting = freeink::font::FtFont::HintingMode::Auto;
   options.stemDarkening = true;
   auto openFace = [&](freeink::font::FtFont& face, const uint16_t px) {
     const bool ok =
-        streamed ? face.initStream(&XgfFont::streamRead, this, fileSize, px) : face.init(fileBytes, fileSize, px);
+        streamed ? face.initStream(&ReadFace::streamRead, this, fileSize, px) : face.init(fileBytes, fileSize, px);
     if (!ok) {
       return false;
     }
@@ -301,16 +301,16 @@ bool XgfFont::initFaces() {
   return true;
 }
 
-void XgfFont::freeFaces() {
+void ReadFace::freeFaces() {
   clearVert();
   bodyFace.deinit();
   rubyFace.deinit();
   facesReady = false;
 }
 
-void XgfFont::releaseMaps() { freeFaces(); }
+void ReadFace::releaseMaps() { freeFaces(); }
 
-bool XgfFont::restoreMaps() {
+bool ReadFace::restoreMaps() {
   if (facesReady) {
     return true;
   }
@@ -321,12 +321,12 @@ bool XgfFont::restoreMaps() {
   return initFaces();
 }
 
-void XgfFont::freeLru() {
+void ReadFace::freeLru() {
   freeTable(bodyLru);
   freeTable(rubyLru);
 }
 
-uint16_t XgfFont::glyphId(const uint32_t cp) const {
+uint16_t ReadFace::glyphId(const uint32_t cp) const {
   if (!facesReady || cp == 0) {
     return 0xFFFF;
   }
@@ -337,14 +337,14 @@ uint16_t XgfFont::glyphId(const uint32_t cp) const {
   return static_cast<uint16_t>(id);
 }
 
-uint16_t XgfFont::rubySlot(const uint16_t bodyId) const {
+uint16_t ReadFace::rubySlot(const uint16_t bodyId) const {
   if (!wantRuby || !facesReady || bodyId == 0xFFFF) {
     return 0xFFFF;
   }
   return bodyId;
 }
 
-bool XgfFont::allocTable(Lru& t, const uint16_t cap, const uint16_t stride) {
+bool ReadFace::allocTable(Lru& t, const uint16_t cap, const uint16_t stride) {
   if (cap == 0 || stride == 0) {
     return false;
   }
@@ -365,7 +365,7 @@ bool XgfFont::allocTable(Lru& t, const uint16_t cap, const uint16_t stride) {
   return true;
 }
 
-void XgfFont::freeTable(Lru& t) {
+void ReadFace::freeTable(Lru& t) {
   heap_caps_free(t.pixels);
   heap_caps_free(t.entries);
   t.pixels = nullptr;
@@ -376,7 +376,7 @@ void XgfFont::freeTable(Lru& t) {
   t.stride = 0;
 }
 
-bool XgfFont::allocLru() {
+bool ReadFace::allocLru() {
   if (bodyLru.pixels) {
     return true;
   }
@@ -403,7 +403,7 @@ bool XgfFont::allocLru() {
   return true;
 }
 
-bool XgfFont::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest, const bool bold) {
+bool ReadFace::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest, const bool bold) {
   freeink::font::FtFont& face = ruby ? rubyFace : bodyFace;
   const uint8_t em = ruby ? rubyEmPx_ : emPx_;
   const uint16_t stride = slotStride(em);
@@ -451,7 +451,7 @@ bool XgfFont::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* des
   return true;
 }
 
-bool XgfFont::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) const {
+bool ReadFace::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) const {
   out = {};
   const Lru& t = ruby ? rubyLru : bodyLru;
   const uint8_t* slot = nullptr;
@@ -485,7 +485,7 @@ bool XgfFont::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) cons
   return true;
 }
 
-XgfFont::CacheStats XgfFont::cacheStats() const {
+ReadFace::CacheStats ReadFace::cacheStats() const {
   CacheStats s;
   s.bodyUsed = bodyLru.used;
   s.bodyCap = bodyLru.cap;
@@ -501,7 +501,7 @@ XgfFont::CacheStats XgfFont::cacheStats() const {
   return s;
 }
 
-const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby, const uint8_t style) {
+const uint8_t* ReadFace::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby, const uint8_t style) {
   if (!t.pixels || t.cap == 0) {
     return nullptr;
   }
@@ -548,14 +548,14 @@ const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby, 
   return dest;
 }
 
-const uint8_t* XgfFont::cacheSlot(const uint16_t bodyId, const bool ruby, const uint8_t style) {
+const uint8_t* ReadFace::cacheSlot(const uint16_t bodyId, const bool ruby, const uint8_t style) {
   if (!bodyLru.pixels && !allocLru()) {
     return nullptr;
   }
   return cacheIn(ruby ? rubyLru : bodyLru, bodyId, ruby, style);
 }
 
-void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool ruby) {
+void ReadFace::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool ruby) {
   if (!bodyIds || count == 0 || !opened) {
     return;
   }
@@ -599,7 +599,7 @@ void XgfFont::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool 
   LOG_INF("FONT", "prewarm %s n=%u hit=%u miss=%u %lums", ruby ? "ruby" : "body", n, hits, misses, millis() - t0);
 }
 
-bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const bool ruby, const bool rotate90,
+bool ReadFace::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const bool ruby, const bool rotate90,
                    const Plane plane, const uint8_t style) {
   const uint8_t* slot = cacheSlot(bodyId, ruby, style);
   if (!slot) {
@@ -664,7 +664,7 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
   return true;
 }
 
-bool XgfFont::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const Plane plane) {
+bool ReadFace::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const Plane plane) {
   if (size <= 0) {
     return false;
   }
@@ -702,7 +702,7 @@ bool XgfFont::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId,
   return true;
 }
 
-bool XgfFont::blitUi(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const bool black) {
+bool ReadFace::blitUi(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const bool black) {
   if (size <= 0) {
     return false;
   }
@@ -747,7 +747,7 @@ bool XgfFont::blitUi(Gfx& gfx, const int x, const int y, const uint16_t bodyId, 
   return true;
 }
 
-int XgfFont::drawUtf8(Gfx& gfx, const int fontId, const int x, const int y, const char* text, const bool black,
+int ReadFace::drawUtf8(Gfx& gfx, const int fontId, const int x, const int y, const char* text, const bool black,
                       const int maxX) {
   if (!text || text[0] == '\0') {
     return 0;
@@ -1095,12 +1095,12 @@ VertSet* buildVert(const uint8_t* buf, const size_t len) {
 
 }  // namespace
 
-void XgfFont::clearVert() {
+void ReadFace::clearVert() {
   freeVert(static_cast<VertSet*>(vert));
   vert = nullptr;
 }
 
-bool XgfFont::readFont(const uint32_t off, uint8_t* dst, const uint32_t n) {
+bool ReadFace::readFont(const uint32_t off, uint8_t* dst, const uint32_t n) {
   if (n == 0) {
     return true;
   }
@@ -1120,7 +1120,7 @@ bool XgfFont::readFont(const uint32_t off, uint8_t* dst, const uint32_t n) {
   return streamRead(this, off, dst, n) == n;
 }
 
-void XgfFont::loadVert() {
+void ReadFace::loadVert() {
   clearVert();
   uint8_t hdr[12]{};
   if (!readFont(0, hdr, sizeof(hdr))) {
@@ -1185,7 +1185,7 @@ void XgfFont::loadVert() {
   }
 }
 
-uint16_t XgfFont::vertOf(const uint16_t gid) const {
+uint16_t ReadFace::vertOf(const uint16_t gid) const {
   const auto* v = static_cast<const VertSet*>(vert);
   if (!v || gid == 0) {
     return gid;
@@ -1210,7 +1210,7 @@ uint16_t XgfFont::vertOf(const uint16_t gid) const {
   return g;
 }
 
-int16_t XgfFont::advancePx(const uint32_t cp, const int px) {
+int16_t ReadFace::advancePx(const uint32_t cp, const int px) {
   if (!facesReady || px < 1) {
     return 0;
   }
@@ -1221,7 +1221,7 @@ int16_t XgfFont::advancePx(const uint32_t cp, const int px) {
   return bodyFace.advance(cp, static_cast<uint16_t>(size), 0);
 }
 
-bool XgfFont::blitCell(Gfx& gfx, const int x, const int y, const int cellW, const int cellH, const uint16_t bodyId,
+bool ReadFace::blitCell(Gfx& gfx, const int x, const int y, const int cellW, const int cellH, const uint16_t bodyId,
                        int px, const bool vertical, const bool bold, const bool rotate90, const bool yakumono,
                        const Plane plane) {
   if (plane != Plane::Ink) {
