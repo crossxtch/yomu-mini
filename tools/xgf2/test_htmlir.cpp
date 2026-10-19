@@ -183,7 +183,7 @@ int main() {
         "<em class=\"em-dot\">丸</em>"
         "</p><a name=\"sec\">い</a></body></html>";
     ts::FaceRule rules[8]{};
-    uint8_t nRules = 0;
+    uint16_t nRules = 0;
     ts::scanStyleTags(html, std::strlen(html), rules, nRules);
     struct Hit {
       std::vector<Atom> atoms;
@@ -350,7 +350,7 @@ int main() {
         "<html><head><style>span.big{font-size:150%} strong{font-weight:bold}</style></head>"
         "<body><p><span class=\"big\">大</span><strong>太</strong></p></body></html>";
     ts::FaceRule rules[8]{};
-    uint8_t nRules = 0;
+    uint16_t nRules = 0;
     ts::scanStyleTags(html, std::strlen(html), rules, nRules);
     Dump d;
     ts::AtomSink sink{&d, collect, nullptr, rules, nRules};
