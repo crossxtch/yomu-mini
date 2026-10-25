@@ -157,7 +157,9 @@ bool TypesetBook::hasBookExt(const char* path) {
 }
 
 void TypesetBook::indexPath(char* out, const size_t outSize) const {
-  snprintf(out, outSize, "/.yomu/t_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
+  char face[9] = "00000000";
+  font.metricsId(face, sizeof(face));
+  snprintf(out, outSize, "/.yomu/t_%08lx_%s.bin", static_cast<unsigned long>(pathHash(filepath)), face);
 }
 
 void TypesetBook::chapterPath(char* out, const size_t outSize) const {
@@ -212,7 +214,7 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
     if (!ctx || em <= 0) {
       return 0;
     }
-    return static_cast<ReadFace*>(ctx)->advancePx(cp, em);
+    return static_cast<BookFace*>(ctx)->advancePx(cp, em);
   };
   layoutOpt.measureCtx = &font;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ReadFace.h>
+#include <BookFace.h>
 
 #include <string>
 #include <vector>
@@ -11,7 +11,7 @@ class FontsScreen final : public Screen {
   std::vector<std::string> names;
   int index = 0;
   int window = 0;
-  ReadFace cjk;
+  BookFace cjk;
 
   void load();
   void loadCjk();

@@ -74,7 +74,7 @@ const char* ReaderScreen::bookError() const {
 
 const std::vector<ts::ChapterInfo>& ReaderScreen::bookChapters() { return book->getChapters(); }
 
-ReadFace* ReaderScreen::cjkFont() { return (loaded && book) ? book->cjkFont() : nullptr; }
+BookFace* ReaderScreen::cjkFont() { return (loaded && book) ? book->cjkFont() : nullptr; }
 
 void ReaderScreen::loadProgress() {
   char p[64];

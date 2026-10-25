@@ -87,8 +87,10 @@ def merge_intervals(cps: list[int], id_of: dict[int, int]) -> list[tuple[int, in
 
 
 def raster_char(font, ch: str, em: int) -> bytes:
-    img = __import__("PIL.Image", fromlist=["Image"]).Image.new("L", (em, em), 0)
-    draw = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).ImageDraw.Draw(img)
+    image_mod = __import__("PIL.Image", fromlist=["new"])
+    draw_mod = __import__("PIL.ImageDraw", fromlist=["Draw"])
+    img = image_mod.new("L", (em, em), 0)
+    draw = draw_mod.Draw(img)
     bbox = font.getbbox(ch)
     if bbox is None:
         return pack_2bit([0] * (em * em), em)

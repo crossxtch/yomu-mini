@@ -101,8 +101,19 @@ enum FaceCatalog {
     }
 
     static func joyoFromBundle() -> [UInt32] {
-        guard let url = Bundle.main.url(forResource: "joyo_kanji", withExtension: "txt") else { return [] }
-        return joyo(from: url)
+        if let url = Bundle.main.url(forResource: "joyo_kanji", withExtension: "txt") {
+            let cps = joyo(from: url)
+            if !cps.isEmpty { return cps }
+        }
+        // `swift run` has no app bundle. The list lives next to this package.
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for _ in 0..<6 {
+            let candidate = dir.appendingPathComponent("joyo_kanji.txt")
+            let cps = joyo(from: candidate)
+            if !cps.isEmpty { return cps }
+            dir.deleteLastPathComponent()
+        }
+        return []
     }
 
     static func fileName(postscript: String, device: String) -> String {

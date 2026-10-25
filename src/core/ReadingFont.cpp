@@ -1,8 +1,8 @@
 #include "core/ReadingFont.h"
 
+#include <BakedFont.h>
 #include <HalStorage.h>
 #include <Logging.h>
-#include <ReadFace.h>
 
 #include <cstdio>
 #include <cstring>
@@ -29,38 +29,18 @@ bool endsWithI(const char* name, const char* ext) {
   return true;
 }
 
-bool fontExt(const char* name) { return endsWithI(name, ".ttf") || endsWithI(name, ".otf") || endsWithI(name, ".ttc"); }
+bool fontExt(const char* name) {
+  return endsWithI(name, ".ttf") || endsWithI(name, ".otf") || endsWithI(name, ".ttc") || endsWithI(name, ".xgf2") ||
+         endsWithI(name, ".ygzf");
+}
 
 bool illegalFatChar(const char c) {
   return c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|';
 }
 
-bool firstFilename(char* out, const size_t outSize) {
-  if (!out || outSize < 6) {
-    return false;
-  }
-  out[0] = '\0';
-  HalFile dir = Storage.open(ReadingFont::kDir);
-  if (!dir || !dir.isDirectory()) {
-    return false;
-  }
-  char name[HalFile::kMaxNameBytes];
-  for (HalFile file = dir.openNextFile(); file; file = dir.openNextFile()) {
-    if (file.isDirectory() || file.getName(name, sizeof(name)) == 0) {
-      continue;
-    }
-    if (!ReadingFont::isFontFilename(name)) {
-      continue;
-    }
-    snprintf(out, outSize, "%s", name);
-    return true;
-  }
-  return false;
-}
-
 bool stripDuplicateExt(char* name) {
   const size_t n = strlen(name);
-  for (const char* ext : {".ttf", ".otf", ".ttc"}) {
+  for (const char* ext : {".ttf", ".otf", ".ttc", ".xgf2", ".ygzf"}) {
     const size_t e = strlen(ext);
     if (n > e * 2 && endsWithI(name, ext) && endsWithI(name + n - e * 2, ext)) {
       name[n - e] = '\0';
@@ -75,6 +55,10 @@ bool stripDuplicateExt(char* name) {
 void ReadingFont::migrate() {
   Storage.ensureDirectoryExists(Settings::kDir);
   Storage.ensureDirectoryExists(kDir);
+}
+
+bool ReadingFont::isBuiltinId(const char* name) {
+  return name && (strcmp(name, kMinchoId) == 0 || strcmp(name, kGothicId) == 0);
 }
 
 bool ReadingFont::isFontFilename(const char* name) {
@@ -121,23 +105,31 @@ bool ReadingFont::activePath(char* out, const size_t outSize) {
   if (!out || outSize == 0) {
     return false;
   }
-  out[0] = '\0';
-  if (settings.fontFile[0]) {
-    makePath(out, outSize, settings.fontFile);
-    if (Storage.exists(out)) {
-      return true;
-    }
-  }
-  char name[kMaxFileName + 1];
-  if (fontfile::firstFilename(name, sizeof(name))) {
-    makePath(out, outSize, name);
+  const char* id = settings.fontFile;
+  if (id[0] == '\0' || strcmp(id, kMinchoId) == 0) {
+    snprintf(out, outSize, "%s", BakedFont::kMinchoPath);
     return true;
   }
-  out[0] = '\0';
-  return false;
+  if (strcmp(id, kGothicId) == 0) {
+    snprintf(out, outSize, "%s", BakedFont::kGothicPath);
+    return true;
+  }
+  makePath(out, outSize, id);
+  if (Storage.exists(out)) {
+    return true;
+  }
+  LOG_INF("FONT", "Missing %s, using mincho", id);
+  snprintf(out, outSize, "%s", BakedFont::kMinchoPath);
+  return true;
 }
 
 bool ReadingFont::setActive(const char* filename) {
+  if (isBuiltinId(filename)) {
+    snprintf(settings.fontFile, sizeof(settings.fontFile), "%s", filename);
+    settings.save();
+    LOG_INF("FONT", "Active %s", filename);
+    return true;
+  }
   char name[kMaxFileName + 1];
   if (!copyFilename(name, sizeof(name), filename)) {
     return false;
@@ -154,7 +146,7 @@ bool ReadingFont::setActive(const char* filename) {
   return true;
 }
 
-bool ReadingFont::loadUi(ReadFace& font) {
+bool ReadingFont::loadUi(BookFace& font) {
   char path[192];
   if (!activePath(path, sizeof(path))) {
     return false;

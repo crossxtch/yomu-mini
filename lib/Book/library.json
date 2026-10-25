@@ -5,6 +5,7 @@
     "Miniz": "*",
     "ScratchHeap": "*",
     "ReadFace": "*",
+    "BookFace": "*",
     "FreeInkFont": "*",
     "hal": "*",
     "typeset": "*",

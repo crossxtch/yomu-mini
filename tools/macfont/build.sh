@@ -1,5 +1,6 @@
 #!/bin/bash
 # Build yomu.app and run the encoder self-test. No device flash.
+# Day-to-day launch from this directory: swift run
 set -euo pipefail
 cd "$(dirname "$0")"
 

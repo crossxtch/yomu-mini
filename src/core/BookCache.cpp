@@ -44,6 +44,30 @@ void removeFor(const char* bookPath) {
   drop("p");
   drop("i");
   drop("s");
+  // Page indexes are per face: t_<book>_<face>.bin
+  char leafPrefix[16];
+  snprintf(leafPrefix, sizeof(leafPrefix), "t_%08lx_", static_cast<unsigned long>(h));
+  HalFile dir = Storage.open(Settings::kDir);
+  std::vector<std::string> faced;
+  faced.reserve(4);
+  if (dir && dir.isDirectory()) {
+    char name[HalFile::kMaxNameBytes];
+    for (HalFile file = dir.openNextFile(); file; file = dir.openNextFile()) {
+      if (file.isDirectory() || file.getName(name, sizeof(name)) == 0) {
+        continue;
+      }
+      if (strncmp(name, leafPrefix, strlen(leafPrefix)) == 0) {
+        faced.emplace_back(name);
+      }
+    }
+  }
+  dir = HalFile();
+  for (const auto& leaf : faced) {
+    snprintf(p, sizeof(p), "%s/%s", Settings::kDir, leaf.c_str());
+    if (Storage.remove(p)) {
+      LOG_INF("CACHE", "Removed %s", p);
+    }
+  }
   if (settings.lastBookPath[0] && strcmp(settings.lastBookPath, bookPath) == 0) {
     settings.lastBookPath[0] = '\0';
     settings.save();

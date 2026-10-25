@@ -6,7 +6,7 @@ description: "Feature-scope discipline for the yomu-mini e-reader. Use when addi
 # Scope Discipline
 
 The mission: typeset an EPUB or a UTF-8 text file on the Xteink X4 Classic.
-One firmware binary. The UI is Japanese. Reading faces are TrueType, rasterized on device.
+One firmware binary. The UI is Japanese. Reading faces default to prebaked JIS bitmaps. On-device TrueType rasterization is optional.
 
 ## The gate
 

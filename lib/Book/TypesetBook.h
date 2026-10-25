@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ReadFace.h>
+#include <BookFace.h>
 
 #include <cstdint>
 #include <vector>
@@ -50,7 +50,7 @@ class TypesetBook {
 
   // Recomputes page ranges for chapters whose atoms are already indexed.
   const std::vector<ts::ChapterInfo>& getChapters();
-  ReadFace* cjkFont() { return font.loaded() ? &font : nullptr; }
+  BookFace* cjkFont() { return font.loaded() ? &font : nullptr; }
 
   bool drawPage(Gfx& gfx, uint32_t pageIndex, int& pagesUntilFullRefresh, int refreshFrequency);
   void prefetchForward(uint32_t fromPageIndex);
@@ -81,7 +81,7 @@ class TypesetBook {
   char atomPath[64]{};
   char picturePath[64]{};
   const char* error = "not open";
-  ReadFace font;
+  BookFace font;
   ts::AtomReader atoms;
   ts::PageLayouter layouter;
   ts::LayoutOptions layoutOpt{};

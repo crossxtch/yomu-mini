@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ReadFace.h>
+#include <BookFace.h>
 
 #include "core/Screen.h"
 
@@ -8,7 +8,7 @@ class HomeScreen final : public Screen {
   int index = 0;
   int itemCount = 0;
   uint8_t shownMinute = 255;
-  ReadFace cjk;
+  BookFace cjk;
 
   void refreshMenu();
   void loadCjk();

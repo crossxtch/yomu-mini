@@ -43,5 +43,5 @@ class ReaderScreen final : public Screen {
 
   void jumpToPage(uint32_t targetPage);
   void openChapter(uint16_t chapterIndex);
-  ReadFace* cjkFont();
+  BookFace* cjkFont();
 };

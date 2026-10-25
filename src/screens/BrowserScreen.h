@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ReadFace.h>
+#include <BookFace.h>
 
 #include <string>
 #include <vector>
@@ -18,7 +18,7 @@ class BrowserScreen final : public Screen {
   int window = 0;
   uint8_t shownMinute = 255;
   Mode mode = Mode::Books;
-  ReadFace cjk;
+  BookFace cjk;
 
   void load();
   void activate();

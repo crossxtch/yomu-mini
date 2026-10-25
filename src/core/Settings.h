@@ -25,7 +25,8 @@ struct Settings {
   uint8_t clockUtcOffsetQ = 48;           // 48 = UTC+0; 15-minute steps, 0 = UTC-12, 104 = UTC+14
   uint16_t ntpSyncYear = 0;               // UTC year of last NTP; 0 = never
   uint8_t ntpSyncMonth = 0;               // 1-12; NTP at most once per calendar month
-  char fontFile[80]{};                    // basename in /.yomu/fonts/; empty = first installed
+  char fontFile[80]{};                    // empty or *mincho = built-in mincho; *gothic = built-in gothic;
+                                          // otherwise a basename in /.yomu/fonts/ (.xgf2 baked, .ttf rasterized)
   // Was the UI language. Kept so settings.bin stays the same size.
   uint8_t reservedLanguage = 0;
 
