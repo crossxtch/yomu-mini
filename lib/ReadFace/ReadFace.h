@@ -117,13 +117,26 @@ class ReadFace {
 
   static unsigned long streamRead(void* ctx, unsigned long offset, unsigned char* buffer, unsigned long count);
 
+  // A cached slice of the file. `fileOff` is the source offset; the bytes
+  // live at `fileBytes + cacheOff`. Resident faces are one span of the
+  // whole file. Streamed faces keep every table except `glyf`.
+  struct CacheSpan {
+    uint32_t fileOff = 0;
+    uint32_t cacheOff = 0;
+    uint32_t len = 0;
+  };
+  static constexpr int kMaxSpans = 8;
+
   char filepath[256]{};
   const char* error = "not loaded";
   HalFile file;
   uint8_t* fileBytes = nullptr;
   uint32_t fileSize = 0;
-  uint32_t prefixBytes = 0;
+  uint32_t cacheBytes = 0;
+  CacheSpan spans[kMaxSpans]{};
+  uint8_t spanCount = 0;
   bool streamed = false;
+  bool lastOpenOom = false;
   bool opened = false;
   bool facesReady = false;
   bool wantRuby = true;
@@ -147,6 +160,9 @@ class ReadFace {
   uint32_t statSdUs = 0;
 
   bool loadBytes();
+  int loadResident();
+  bool loadTableCache();
+  const uint8_t* cachedRange(uint32_t off, uint32_t n) const;
   void freeBytes();
   bool initFaces();
   void freeFaces();

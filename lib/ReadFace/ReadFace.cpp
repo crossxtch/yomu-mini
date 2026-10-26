@@ -13,9 +13,66 @@
 
 namespace {
 
-constexpr uint32_t kResidentMax = 6 * 1024 * 1024;
-constexpr uint32_t kStreamPrefix = 1024 * 1024;
+// Copying a 5 MB face plus the 1 MB glyph cache does not fit in 8 MB PSRAM.
+// Larger faces stream. `glyf` stays on the card; the other tables are cached.
+constexpr uint32_t kResidentMax = 2 * 1024 * 1024;
+constexpr uint32_t kCacheBudget = 1024 * 1024;
 constexpr uint32_t kInkThreshold = 1;
+constexpr int kMaxSfntTables = 64;
+
+uint32_t tag4(const char a, const char b, const char c, const char d) {
+  return (static_cast<uint32_t>(static_cast<uint8_t>(a)) << 24) |
+         (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 16) |
+         (static_cast<uint32_t>(static_cast<uint8_t>(c)) << 8) | static_cast<uint8_t>(d);
+}
+
+uint32_t be32at(const uint8_t* p) {
+  return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+         (static_cast<uint32_t>(p[2]) << 8) | p[3];
+}
+
+uint16_t be16at(const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
+
+bool readFully(HalFile& file, const uint32_t off, uint8_t* dst, const uint32_t n) {
+  uint32_t got = 0;
+  while (got < n) {
+    if (!file.seekSet(off + got)) {
+      return false;
+    }
+    const int r = file.read(dst + got, n - got);
+    if (r <= 0) {
+      return false;
+    }
+    got += static_cast<uint32_t>(r);
+  }
+  return true;
+}
+
+// Lower rank stays when the cache budget is tight. `glyf` is never cached.
+int tableRank(const uint32_t tag) {
+  if (tag == tag4('h', 'e', 'a', 'd')) return 0;
+  if (tag == tag4('m', 'a', 'x', 'p')) return 1;
+  if (tag == tag4('l', 'o', 'c', 'a')) return 2;
+  if (tag == tag4('h', 'h', 'e', 'a')) return 3;
+  if (tag == tag4('h', 'm', 't', 'x')) return 4;
+  if (tag == tag4('c', 'm', 'a', 'p')) return 5;
+  if (tag == tag4('O', 'S', '/', '2')) return 6;
+  if (tag == tag4('n', 'a', 'm', 'e')) return 7;
+  if (tag == tag4('G', 'S', 'U', 'B')) return 8;
+  if (tag == tag4('v', 'h', 'e', 'a')) return 9;
+  if (tag == tag4('v', 'm', 't', 'x')) return 10;
+  if (tag == tag4('c', 'v', 't', ' ')) return 11;
+  if (tag == tag4('f', 'p', 'g', 'm')) return 12;
+  if (tag == tag4('p', 'r', 'e', 'p')) return 13;
+  if (tag == tag4('g', 'a', 's', 'p')) return 14;
+  if (tag == tag4('G', 'P', 'O', 'S')) return 15;
+  if (tag == tag4('p', 'o', 's', 't')) return 16;
+  return 100;
+}
+
+bool skipTable(const uint32_t tag) {
+  return tag == tag4('g', 'l', 'y', 'f') || tag == tag4('C', 'F', 'F', ' ') || tag == tag4('C', 'F', 'F', '2');
+}
 constexpr uint16_t kMaxCached = 4096;
 
 uint8_t quantize(const uint8_t coverage) {
@@ -131,27 +188,68 @@ uint16_t capFor(const uint32_t budget, const uint16_t stride) {
 unsigned long ReadFace::streamRead(void* ctx, const unsigned long offset, unsigned char* buffer,
                                   const unsigned long count) {
   auto* self = static_cast<ReadFace*>(ctx);
-  if (count == 0) {
+  if (count == 0 || !buffer) {
     return 0;
   }
   unsigned long done = 0;
-  if (offset < self->prefixBytes && self->fileBytes) {
-    const unsigned long fromCache = (offset + count <= self->prefixBytes) ? count : self->prefixBytes - offset;
-    memcpy(buffer, self->fileBytes + offset, fromCache);
-    done = fromCache;
-    if (done == count) {
-      return count;
+  while (done < count) {
+    const unsigned long pos = offset + done;
+    const uint8_t* hit = nullptr;
+    unsigned long have = 0;
+    for (uint8_t i = 0; i < self->spanCount; ++i) {
+      const CacheSpan& span = self->spans[i];
+      if (pos < span.fileOff || span.len == 0) {
+        continue;
+      }
+      const unsigned long delta = pos - span.fileOff;
+      if (delta >= span.len) {
+        continue;
+      }
+      hit = self->fileBytes + span.cacheOff + delta;
+      have = span.len - delta;
+      break;
     }
-  }
-  const unsigned long fileOff = offset + done;
-  const unsigned long tSd = micros();
-  const bool sought = self->file.seekSet(fileOff);
-  const int n = sought ? self->file.read(buffer + done, count - done) : 0;
-  self->statSdUs += static_cast<uint32_t>(micros() - tSd);
-  ++self->statSdReads;
-  if (n > 0) {
-    self->statSdBytes += static_cast<uint32_t>(n);
-    done += static_cast<unsigned long>(n);
+    if (hit) {
+      unsigned long n = count - done;
+      if (n > have) {
+        n = have;
+      }
+      memcpy(buffer + done, hit, n);
+      done += n;
+      continue;
+    }
+    unsigned long hole = count - done;
+    for (uint8_t i = 0; i < self->spanCount; ++i) {
+      const CacheSpan& span = self->spans[i];
+      if (span.fileOff > pos && span.fileOff - pos < hole) {
+        hole = span.fileOff - pos;
+      }
+    }
+    if (!self->file.isOpen() || hole == 0) {
+      break;
+    }
+    const unsigned long tSd = micros();
+    unsigned long got = 0;
+    while (got < hole) {
+      if (!self->file.seekSet(pos + got)) {
+        break;
+      }
+      const int n = self->file.read(buffer + done + got, hole - got);
+      if (n <= 0) {
+        break;
+      }
+      got += static_cast<unsigned long>(n);
+    }
+    self->statSdUs += static_cast<uint32_t>(micros() - tSd);
+    ++self->statSdReads;
+    if (got == 0) {
+      break;
+    }
+    self->statSdBytes += static_cast<uint32_t>(got);
+    done += got;
+    if (got < hole) {
+      break;
+    }
   }
   return done;
 }
@@ -178,9 +276,26 @@ bool ReadFace::load(const char* path, const uint32_t lruMaxBytes, const bool wan
     close();
     return false;
   }
-  if (!loadBytes() || !initFaces()) {
+  // A contiguous file seeks in either direction without walking the FAT.
+  // Uploads larger than the preallocate cap may still be fragmented.
+  file.probeContiguous();
+  if (!loadBytes()) {
     close();
     return false;
+  }
+  if (!initFaces()) {
+    // A resident copy that ran out of PSRAM can still open as a stream.
+    if (!lastOpenOom || streamed) {
+      close();
+      return false;
+    }
+    freeFaces();
+    freeBytes();
+    streamed = true;
+    if (!reopenFile() || !loadTableCache() || !initFaces()) {
+      close();
+      return false;
+    }
   }
   opened = true;
   error = "";
@@ -196,8 +311,10 @@ void ReadFace::close() {
   releaseFile();
   freeLru();
   fileSize = 0;
-  prefixBytes = 0;
+  cacheBytes = 0;
+  spanCount = 0;
   streamed = false;
+  lastOpenOom = false;
   filepath[0] = '\0';
   statHit = statMiss = statFf = statBlocked = 0;
   statSdReads = statSdBytes = statSdUs = 0;
@@ -228,48 +345,261 @@ bool ReadFace::reopenFile() {
 }
 
 bool ReadFace::loadBytes() {
+  freeBytes();
   const size_t spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
-  streamed = fileSize > kResidentMax || spiram < static_cast<size_t>(fileSize) + 256 * 1024;
-  if (!streamed) {
-    fileBytes = static_cast<uint8_t*>(fiFontMalloc(fileSize));
-    if (!fileBytes) {
-      streamed = true;
-    } else if (!file.seekSet(0) || file.read(fileBytes, fileSize) != static_cast<int>(fileSize)) {
-      error = "font read";
-      return false;
-    } else {
-      prefixBytes = fileSize;
-      releaseFile();
+  const size_t reserve = static_cast<size_t>(lruLimit) + (wantRuby ? kRubyLruBytes : 0) + 512 * 1024;
+  if (fileSize <= kResidentMax && spiram >= static_cast<size_t>(fileSize) + reserve) {
+    const int resident = loadResident();
+    if (resident > 0) {
+      streamed = false;
       return true;
     }
+    if (resident < 0) {
+      return false;
+    }
   }
-  prefixBytes = fileSize < kStreamPrefix ? fileSize : kStreamPrefix;
-  if (spiram < static_cast<size_t>(prefixBytes) + 256 * 1024) {
-    prefixBytes = 0;
-    return true;
-  }
-  fileBytes = static_cast<uint8_t*>(fiFontMalloc(prefixBytes));
+  streamed = true;
+  return loadTableCache();
+}
+
+int ReadFace::loadResident() {
+  fileBytes = static_cast<uint8_t*>(fiFontMalloc(fileSize));
   if (!fileBytes) {
-    prefixBytes = 0;
+    return 0;
+  }
+  if (!readFully(file, 0, fileBytes, fileSize)) {
+    freeBytes();
+    error = "font read";
+    return -1;
+  }
+  spans[0].fileOff = 0;
+  spans[0].cacheOff = 0;
+  spans[0].len = fileSize;
+  spanCount = 1;
+  cacheBytes = fileSize;
+  releaseFile();
+  return 1;
+}
+
+bool ReadFace::loadTableCache() {
+  freeBytes();
+  if (!file.isOpen() || fileSize < 12) {
     return true;
   }
-  if (!file.seekSet(0) || file.read(fileBytes, prefixBytes) != static_cast<int>(prefixBytes)) {
-    fiFontFree(fileBytes);
-    fileBytes = nullptr;
-    prefixBytes = 0;
-  } else {
-    LOG_INF("FONT", "Cached %u KB font prefix", static_cast<unsigned>(prefixBytes / 1024));
+  uint8_t hdr[12]{};
+  if (!readFully(file, 0, hdr, sizeof(hdr))) {
+    return true;
   }
+  uint32_t sfnt = 0;
+  if (hdr[0] == 't' && hdr[1] == 't' && hdr[2] == 'c' && hdr[3] == 'f') {
+    if (be32at(hdr + 8) < 1) {
+      return true;
+    }
+    uint8_t ent[4]{};
+    if (!readFully(file, 12, ent, sizeof(ent))) {
+      return true;
+    }
+    sfnt = be32at(ent);
+  }
+  if (sfnt > fileSize || fileSize - sfnt < 12) {
+    return true;
+  }
+  uint8_t sh[12]{};
+  if (!readFully(file, sfnt, sh, sizeof(sh))) {
+    return true;
+  }
+  uint16_t nTables = be16at(sh + 4);
+  if (nTables > kMaxSfntTables) {
+    nTables = kMaxSfntTables;
+  }
+  const uint32_t dirLen = 12u + static_cast<uint32_t>(nTables) * 16u;
+  if (dirLen > fileSize - sfnt) {
+    return true;
+  }
+  uint8_t dir[12 + kMaxSfntTables * 16];
+  if (!readFully(file, sfnt, dir, dirLen)) {
+    return true;
+  }
+
+  struct Rec {
+    uint32_t tag = 0;
+    uint32_t off = 0;
+    uint32_t len = 0;
+    int rank = 100;
+    bool keep = false;
+  };
+  Rec recs[kMaxSfntTables];
+  int nRec = 0;
+  for (uint16_t i = 0; i < nTables; ++i) {
+    const uint8_t* rec = dir + 12 + static_cast<uint32_t>(i) * 16;
+    const uint32_t tag = be32at(rec);
+    const uint32_t off = be32at(rec + 8);
+    const uint32_t len = be32at(rec + 12);
+    if (skipTable(tag) || len == 0 || len > kCacheBudget || off > fileSize || len > fileSize - off) {
+      continue;
+    }
+    recs[nRec].tag = tag;
+    recs[nRec].off = off;
+    recs[nRec].len = len;
+    recs[nRec].rank = tableRank(tag);
+    ++nRec;
+  }
+
+  struct Range {
+    uint32_t off = 0;
+    uint32_t len = 0;
+  };
+  const bool keepDir = dirLen > 0 && dirLen <= kCacheBudget && sfnt <= fileSize && dirLen <= fileSize - sfnt;
+  const uint32_t headLen = sfnt == 0 ? 0 : (sfnt < 16 ? sfnt : 16);
+  auto buildSpans = [&](Range* out, int& nOut) {
+    Range raw[kMaxSfntTables + 2];
+    int nRaw = 0;
+    if (headLen > 0) {
+      raw[nRaw++] = Range{0, headLen};
+    }
+    if (keepDir) {
+      raw[nRaw++] = Range{sfnt, dirLen};
+    }
+    for (int i = 0; i < nRec; ++i) {
+      if (recs[i].keep) {
+        raw[nRaw++] = Range{recs[i].off, recs[i].len};
+      }
+    }
+    for (int i = 1; i < nRaw; ++i) {
+      Range key = raw[i];
+      int j = i;
+      while (j > 0 && raw[j - 1].off > key.off) {
+        raw[j] = raw[j - 1];
+        --j;
+      }
+      raw[j] = key;
+    }
+    nOut = 0;
+    for (int i = 0; i < nRaw; ++i) {
+      if (raw[i].len == 0) {
+        continue;
+      }
+      if (nOut == 0 || raw[i].off > out[nOut - 1].off + out[nOut - 1].len + 3) {
+        out[nOut++] = raw[i];
+        continue;
+      }
+      const uint32_t endA = out[nOut - 1].off + out[nOut - 1].len;
+      const uint32_t endB = raw[i].off + raw[i].len;
+      const uint32_t end = endA > endB ? endA : endB;
+      out[nOut - 1].len = end - out[nOut - 1].off;
+    }
+  };
+
+  uint32_t used = (headLen > 0 ? headLen : 0) + (keepDir ? dirLen : 0);
+  int order[kMaxSfntTables];
+  for (int i = 0; i < nRec; ++i) {
+    order[i] = i;
+  }
+  for (int i = 1; i < nRec; ++i) {
+    const int key = order[i];
+    int j = i;
+    while (j > 0) {
+      const Rec& a = recs[order[j - 1]];
+      const Rec& b = recs[key];
+      const bool worse = a.rank > b.rank || (a.rank == b.rank && a.len > b.len);
+      if (!worse) {
+        break;
+      }
+      order[j] = order[j - 1];
+      --j;
+    }
+    order[j] = key;
+  }
+  for (int i = 0; i < nRec; ++i) {
+    Rec& rec = recs[order[i]];
+    if (used > kCacheBudget || rec.len > kCacheBudget - used) {
+      continue;
+    }
+    rec.keep = true;
+    used += rec.len;
+  }
+
+  Range merged[kMaxSfntTables + 2];
+  int nMerged = 0;
+  buildSpans(merged, nMerged);
+  while (nMerged > kMaxSpans) {
+    int worst = -1;
+    for (int i = 0; i < nRec; ++i) {
+      if (!recs[i].keep) {
+        continue;
+      }
+      if (worst < 0 || recs[i].rank > recs[worst].rank ||
+          (recs[i].rank == recs[worst].rank && recs[i].len > recs[worst].len)) {
+        worst = i;
+      }
+    }
+    if (worst < 0) {
+      return true;
+    }
+    recs[worst].keep = false;
+    buildSpans(merged, nMerged);
+  }
+  if (nMerged == 0) {
+    return true;
+  }
+  uint32_t total = 0;
+  for (int i = 0; i < nMerged; ++i) {
+    if (merged[i].len > kCacheBudget - total) {
+      return true;
+    }
+    total += merged[i].len;
+  }
+  const size_t spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+  if (spiram < static_cast<size_t>(total) + 64 * 1024) {
+    return true;
+  }
+  fileBytes = static_cast<uint8_t*>(fiFontMalloc(total));
+  if (!fileBytes) {
+    return true;
+  }
+  uint32_t cursor = 0;
+  for (int i = 0; i < nMerged; ++i) {
+    if (!readFully(file, merged[i].off, fileBytes + cursor, merged[i].len)) {
+      freeBytes();
+      return true;
+    }
+    spans[spanCount].fileOff = merged[i].off;
+    spans[spanCount].cacheOff = cursor;
+    spans[spanCount].len = merged[i].len;
+    ++spanCount;
+    cursor += merged[i].len;
+  }
+  cacheBytes = total;
+  LOG_INF("FONT", "Cached %u KB of font tables in %u spans", static_cast<unsigned>(cacheBytes / 1024), spanCount);
   return true;
+}
+
+const uint8_t* ReadFace::cachedRange(const uint32_t off, const uint32_t n) const {
+  if (!fileBytes || n == 0) {
+    return nullptr;
+  }
+  for (uint8_t i = 0; i < spanCount; ++i) {
+    const CacheSpan& span = spans[i];
+    if (off < span.fileOff || span.len == 0) {
+      continue;
+    }
+    const uint32_t delta = off - span.fileOff;
+    if (delta < span.len && n <= span.len - delta) {
+      return fileBytes + span.cacheOff + delta;
+    }
+  }
+  return nullptr;
 }
 
 void ReadFace::freeBytes() {
   fiFontFree(fileBytes);
   fileBytes = nullptr;
-  prefixBytes = 0;
+  cacheBytes = 0;
+  spanCount = 0;
 }
 
 bool ReadFace::initFaces() {
+  lastOpenOom = false;
   freeink::font::FtFont::RenderOptions options;
   options.hinting = freeink::font::FtFont::HintingMode::Auto;
   options.stemDarkening = true;
@@ -284,13 +614,18 @@ bool ReadFace::initFaces() {
     face.setGsubByteBudget(0);
     return true;
   };
+  auto noteOom = [&](const freeink::font::FtFont& face) {
+    lastOpenOom = face.lastInitFailure() == freeink::font::FtFont::InitFailure::Allocation || face.lastInitError() == 0x40;
+  };
   if (!openFace(bodyFace, emPx_)) {
+    noteOom(bodyFace);
     error = "font parse";
     LOG_ERR("FONT", "FreeType open failed (%s, init %d err %d)", filepath, static_cast<int>(bodyFace.lastInitFailure()),
             bodyFace.lastInitError());
     return false;
   }
   if (wantRuby && !openFace(rubyFace, rubyEmPx_)) {
+    noteOom(rubyFace);
     error = "ruby face";
     LOG_ERR("FONT", "Ruby face failed err %d", rubyFace.lastInitError());
     freeFaces();
@@ -1107,16 +1442,6 @@ bool ReadFace::readFont(const uint32_t off, uint8_t* dst, const uint32_t n) {
   if (!dst) {
     return false;
   }
-  if (fileBytes) {
-    const uint32_t have = streamed ? prefixBytes : fileSize;
-    if (off <= have && n <= have - off) {
-      memcpy(dst, fileBytes + off, n);
-      return true;
-    }
-  }
-  if (!file.isOpen()) {
-    return false;
-  }
   return streamRead(this, off, dst, n) == n;
 }
 
@@ -1163,13 +1488,10 @@ void ReadFace::loadVert() {
   if (!found || len < 10 || len > kMaxGsubBytes) {
     return;
   }
-  const uint32_t have = fileBytes ? (streamed ? prefixBytes : fileSize) : 0;
-  const bool covered = fileBytes && off <= have && len <= have - off;
+  const uint8_t* hit = cachedRange(off, len);
   uint8_t* owned = nullptr;
-  const uint8_t* view = nullptr;
-  if (covered) {
-    view = fileBytes + off;
-  } else {
+  const uint8_t* view = hit;
+  if (!view) {
     owned = static_cast<uint8_t*>(cacheAlloc(len));
     if (!owned || !readFont(off, owned, len)) {
       heap_caps_free(owned);
