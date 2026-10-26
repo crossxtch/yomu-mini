@@ -75,39 +75,34 @@ bool skipTable(const uint32_t tag) {
 }
 constexpr uint16_t kMaxCached = 4096;
 
-uint8_t quantize(const uint8_t coverage) {
-  // 255 is solid ink.
-  if (coverage >= 192) return 3;
-  if (coverage >= 128) return 2;
-  if (coverage >= 64) return 1;
-  return 0;
-}
+// FreeType mono coverage is 0 or 255. A lit pixel is black.
+uint8_t quantize(const uint8_t coverage) { return coverage != 0 ? 1 : 0; }
+
+unsigned rowBytesOf(const unsigned em) { return (em + 7u) / 8u; }
 
 uint16_t slotStride(const uint8_t em) {
-  const unsigned rowBytes = (static_cast<unsigned>(em) + 3u) / 4u;
-  return static_cast<uint16_t>(rowBytes * em);
+  return static_cast<uint16_t>(rowBytesOf(em) * em);
 }
 
 uint8_t pixelAt(const uint8_t* slot, const uint8_t em, const int x, const int y) {
   if (x < 0 || y < 0 || x >= em || y >= em) {
     return 0;
   }
-  const unsigned rowBytes = (static_cast<unsigned>(em) + 3u) / 4u;
-  const uint8_t b = slot[static_cast<unsigned>(y) * rowBytes + static_cast<unsigned>(x) / 4u];
-  const unsigned shift = 6u - (static_cast<unsigned>(x) % 4u) * 2u;
-  return static_cast<uint8_t>((b >> shift) & 3u);
+  const unsigned rowBytes = rowBytesOf(em);
+  const uint8_t b = slot[static_cast<unsigned>(y) * rowBytes + static_cast<unsigned>(x) / 8u];
+  return (b & static_cast<uint8_t>(0x80u >> (static_cast<unsigned>(x) & 7u))) != 0 ? 1 : 0;
 }
 
 void putPixel(uint8_t* slot, const uint8_t em, const int x, const int y, const uint8_t v) {
-  const unsigned rowBytes = (static_cast<unsigned>(em) + 3u) / 4u;
-  uint8_t& b = slot[static_cast<unsigned>(y) * rowBytes + static_cast<unsigned>(x) / 4u];
-  const unsigned shift = 6u - (static_cast<unsigned>(x) % 4u) * 2u;
-  b = static_cast<uint8_t>((b & ~(3u << shift)) | ((v & 3u) << shift));
+  if (v == 0) {
+    return;
+  }
+  const unsigned rowBytes = rowBytesOf(em);
+  uint8_t& b = slot[static_cast<unsigned>(y) * rowBytes + static_cast<unsigned>(x) / 8u];
+  b = static_cast<uint8_t>(b | (0x80u >> (static_cast<unsigned>(x) & 7u)));
 }
 
-// 0 paper, 1 light, 2 dark, 3 black. Ink is every non-paper pixel. Gray planes
-// stay clear: a marked gray pixel is driven instead of holding the black the
-// base frame just painted, and on a reading face those pixels are the stem.
+// 0 paper, 1 black. Gray planes stay clear.
 bool planeKeep(const uint8_t v, const ReadFace::Plane plane) {
   return plane == ReadFace::Plane::Ink && v >= kInkThreshold;
 }
@@ -152,12 +147,14 @@ void paintRowBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, in
 
 void fillRowMask(uint8_t* mask, const uint8_t* src, const uint8_t em, const int rowBytes, const ReadFace::Plane plane) {
   memset(mask, 0, 8);
+  if (plane != ReadFace::Plane::Ink) {
+    return;
+  }
   int gx = 0;
   for (int b = 0; b < rowBytes && gx < em; ++b) {
     const uint8_t s = src[b];
-    for (int n = 0; n < 4 && gx < em; ++n, ++gx) {
-      const uint8_t v = static_cast<uint8_t>((s >> (6 - 2 * n)) & 3);
-      if (planeKeep(v, plane)) {
+    for (int n = 0; n < 8 && gx < em; ++n, ++gx) {
+      if ((s & static_cast<uint8_t>(0x80u >> n)) != 0) {
         mask[gx >> 3] |= static_cast<uint8_t>(1u << (7 - (gx & 7)));
       }
     }
@@ -602,6 +599,7 @@ bool ReadFace::initFaces() {
   lastOpenOom = false;
   freeink::font::FtFont::RenderOptions options;
   options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  options.monochrome = true;
   options.stemDarkening = true;
   auto openFace = [&](freeink::font::FtFont& face, const uint16_t px) {
     const bool ok =
@@ -748,6 +746,7 @@ bool ReadFace::rasterizeSlot(const uint16_t bodyId, const bool ruby, uint8_t* de
   }
   freeink::font::FtFont::RenderOptions options;
   options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  options.monochrome = true;
   options.stemDarkening = true;
   options.embolden26_6 = bold ? static_cast<int32_t>(em) * 4 : 0;
   face.setRenderOptions(options);
@@ -951,7 +950,7 @@ bool ReadFace::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, c
   const int stride = gfx.stride();
   const int pw = gfx.fbWidth();
   const int ph = gfx.fbHeight();
-  const int rowBytes = (static_cast<int>(em) + 3) / 4;
+  const int rowBytes = static_cast<int>(rowBytesOf(em));
 
   const bool black = plane == Plane::Ink;
   if (rotate90) {
@@ -978,9 +977,8 @@ bool ReadFace::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, c
     int gx = 0;
     for (int b = 0; b < rowBytes && gx < em; ++b) {
       const uint8_t s = src[b];
-      for (int n = 0; n < 4 && gx < em; ++n, ++gx) {
-        const uint8_t v = static_cast<uint8_t>((s >> (6 - 2 * n)) & 3);
-        if (!planeKeep(v, plane)) {
+      for (int n = 0; n < 8 && gx < em; ++n, ++gx) {
+        if ((s & static_cast<uint8_t>(0x80u >> n)) == 0 || plane != ReadFace::Plane::Ink) {
           continue;
         }
         const int phyY = ph - 1 - x - gx;
@@ -1574,6 +1572,7 @@ bool ReadFace::blitCell(Gfx& gfx, const int x, const int y, const int cellW, con
 
   freeink::font::FtFont::RenderOptions options;
   options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  options.monochrome = true;
   options.stemDarkening = true;
   options.embolden26_6 = bold ? px * 4 : 0;
   bodyFace.setRenderOptions(options);

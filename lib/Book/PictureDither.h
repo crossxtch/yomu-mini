@@ -35,26 +35,12 @@ inline FitBox containFit(const uint16_t srcW, const uint16_t srcH, const uint16_
   return box;
 }
 
-// 255 white … 0 black, same direction as JPEG luma. Panel values: 0 white, 3 black.
-inline uint8_t quantizeGray(const int v) {
-  if (v >= 192) {
-    return 0;
-  }
-  if (v >= 128) {
-    return 1;
-  }
-  if (v >= 64) {
-    return 2;
-  }
-  return 3;
-}
+// 255 white … 0 black, same direction as JPEG luma. Stored bit: 0 white, 1 black.
+inline uint8_t quantizeGray(const int v) { return v >= 128 ? 0 : 1; }
 
-inline int quantizeLevel(const uint8_t pix) {
-  static const int kLevel[4] = {255, 160, 96, 0};
-  return kLevel[pix & 3];
-}
+inline int quantizeLevel(const uint8_t pix) { return pix ? 0 : 255; }
 
-// Floyd–Steinberg one row into a 2-bit page row (MSB first, 4 pixels per byte).
+// Floyd–Steinberg one row into a 1-bit page row (MSB first).
 // `errCur` is consumed. On return it holds the error to apply to the next row.
 inline void ditherRow(const uint8_t* gray, const int n, int16_t* errCur, int16_t* errNext, uint8_t* packed,
                       const int x0) {
@@ -83,12 +69,11 @@ inline void ditherRow(const uint8_t* gray, const int n, int16_t* errCur, int16_t
       errNext[x + 1] = static_cast<int16_t>(errNext[x + 1] + err * 1 / 16);
     }
     const int px = x0 + x;
-    if (px < 0) {
+    if (px < 0 || pix == 0) {
       continue;
     }
-    const unsigned shift = 6u - (static_cast<unsigned>(px) & 3u) * 2u;
-    packed[static_cast<unsigned>(px) >> 2] =
-        static_cast<uint8_t>(packed[static_cast<unsigned>(px) >> 2] | (pix << shift));
+    packed[static_cast<unsigned>(px) >> 3] =
+        static_cast<uint8_t>(packed[static_cast<unsigned>(px) >> 3] | (0x80u >> (static_cast<unsigned>(px) & 7u)));
   }
   memcpy(errCur, errNext, static_cast<size_t>(n) * sizeof(int16_t));
 }

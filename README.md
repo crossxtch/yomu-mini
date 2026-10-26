@@ -13,9 +13,9 @@ src/screens/          home, browser, reader, chapters, settings, update
 src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
-lib/Book              book session, 2-bit paint, and the picture sidecar
+lib/Book              book session, 1-bit paint, and the picture sidecar
 lib/BookFace          reading face used by books and lists
-lib/ReadFace          TrueType glyphs cached as 2-bit em boxes
+lib/ReadFace          TrueType glyphs cached as 1-bit em boxes
 lib/EpdFont           Ubuntu UI fonts
 reference/            CrossPoint submodule (lookup only)
 freeink-sdk/          display and board support

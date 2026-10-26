@@ -8,13 +8,13 @@
 class Gfx;
 
 // Reading face. A TrueType file on the SD card is rasterized on device into
-// fixed 2-bit em boxes and cached in PSRAM. The typesetter still blits those
+// fixed 1-bit em boxes and cached in PSRAM. The typesetter still blits those
 // boxes one em at a time.
 class ReadFace {
  public:
   enum class Plane : uint8_t { Ink, Lsb, Msb };
 
-  // A 40 px 2-bit cell is 400 bytes. 1 MB holds about 2500 body glyphs.
+  // A 40 px cell is 200 bytes. 1 MB holds about 5000 body glyphs.
   static constexpr uint32_t kLruBytes = 1024 * 1024;
   static constexpr uint32_t kRubyLruBytes = 256 * 1024;
   static constexpr uint32_t kUiLruBytes = 128 * 1024;

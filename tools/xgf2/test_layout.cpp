@@ -458,7 +458,7 @@ int main() {
     uint8_t packed[1]{};
     const uint8_t gray[4] = {255, 160, 96, 0};
     ts::ditherRow(gray, 4, cur, next, packed, 0);
-    if (packed[0] != 0x1B) {
+    if (packed[0] != 0x30) {
       std::fprintf(stderr, "packed %02x\n", packed[0]);
       fail("dither bins");
     }

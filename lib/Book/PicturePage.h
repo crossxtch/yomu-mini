@@ -6,11 +6,12 @@
 
 namespace ts {
 
-// PIC2. 16-byte header, then a size table, then id-1 full portrait pages.
-// Pixel 0 is white and 3 is black, four pixels per byte, MSB first.
+// PIC3. 16-byte header, then a size table, then id-1 full portrait pages.
+// One bit per pixel, MSB first. 0 is white and 1 is black.
 // Each size entry is uint16 width, uint16 height: the pixels contain-fit used.
-// A PIC1 sidecar fails the magic check and is rebuilt.
-constexpr uint32_t kPictureMagic = 0x32434950u;
+// A PIC1 or PIC2 sidecar fails the magic check and is rebuilt.
+constexpr uint32_t kPictureMagic = 0x33434950u;
+inline uint32_t pictureRowBytes(const uint16_t pageW) { return (static_cast<uint32_t>(pageW) + 7u) / 8u; }
 constexpr uint16_t kMaxPictures = 48;
 constexpr uint32_t kPictureHeader = 16;
 constexpr uint32_t kPictureSizeBytes = kMaxPictures * 4u;
@@ -46,7 +47,7 @@ class PictureWriter {
   uint16_t commit(uint16_t srcW, uint16_t srcH);
 };
 
-// Copy one stored page into `dst` (pageW * pageH / 4 bytes). Id is 1-based.
+// Copy one stored page into `dst` (`pictureRowBytes(pageW) * pageH` bytes). Id is 1-based.
 bool pictureRead(const char* path, uint16_t id, uint16_t pageW, uint16_t pageH, uint8_t* dst, size_t dstBytes);
 
 // Source pixels stored for image `id`. False when the record is missing.

@@ -379,12 +379,12 @@ bool imagePixelSize(HalFile& image, uint16_t& w, uint16_t& h) {
 
 bool PictureWriter::begin(const char* path, const uint16_t w, const uint16_t h, const bool append) {
   end();
-  if (!path || w < 4 || h == 0 || (w % 4) != 0) {
+  if (!path || w == 0 || h == 0) {
     return false;
   }
   pageW = w;
   pageH = h;
-  rowBytes = static_cast<uint16_t>(w / 4);
+  rowBytes = static_cast<uint16_t>(pictureRowBytes(w));
   pageBytes = static_cast<uint32_t>(rowBytes) * h;
   n = 0;
   if (append) {
@@ -595,10 +595,10 @@ uint16_t PictureWriter::addPng(HalFile& image) {
 
 bool pictureRead(const char* path, const uint16_t id, const uint16_t pageW, const uint16_t pageH, uint8_t* dst,
                  const size_t dstBytes) {
-  if (!path || !dst || id == 0 || pageW < 4 || (pageW % 4) != 0 || pageH == 0) {
+  if (!path || !dst || id == 0 || pageW == 0 || pageH == 0) {
     return false;
   }
-  const size_t need = static_cast<size_t>(pageW / 4) * pageH;
+  const size_t need = pictureRowBytes(pageW) * pageH;
   if (dstBytes < need) {
     return false;
   }

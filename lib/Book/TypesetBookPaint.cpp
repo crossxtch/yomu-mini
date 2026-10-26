@@ -23,62 +23,42 @@ uint32_t fallbackCp(const uint32_t cp) {
   return cp;
 }
 
-// Picture sidecar only. Glyphs deliberately do not use this map: ReadFace
-// leaves its gray planes unmarked so the UC8253 nudge cannot eat the stem.
-// 0 paper, 1 light, 2 dark, 3 black. Light marks the new plane only. Dark
-// marks both. Black and paper stay on the B/W frame.
-bool planeKeep(const uint8_t v, const ReadFace::Plane plane) {
-  if (plane == ReadFace::Plane::Ink) {
-    return v >= 1;
-  }
-  if (plane == ReadFace::Plane::Lsb) {
-    return v == 2;
-  }
-  return v == 1 || v == 2;
+// Picture sidecar is 1-bit, MSB first. A set bit is black.
+bool pictureBlack(const uint8_t* bits, const int pageW, const int x, const int y) {
+  const int rowBytes = static_cast<int>(ts::pictureRowBytes(static_cast<uint16_t>(pageW)));
+  const uint8_t b = bits[static_cast<size_t>(y) * static_cast<size_t>(rowBytes) + static_cast<size_t>(x >> 3)];
+  return (b & static_cast<uint8_t>(0x80u >> (static_cast<unsigned>(x) & 7u))) != 0;
 }
 
 // Logical portrait pixels, same 90° clockwise map as Gfx::drawPixel.
 void blitPicture(Gfx& gfx, const uint8_t* bits, const int pageW, const int pageH, const ReadFace::Plane plane) {
   uint8_t* fb = gfx.frameBuffer();
-  if (!fb || !bits || pageW <= 0 || pageH <= 0 || (pageW % 4) != 0) {
+  if (!fb || !bits || pageW <= 0 || pageH <= 0 || plane != ReadFace::Plane::Ink) {
     return;
   }
   const int stride = gfx.stride();
   const int pw = gfx.fbWidth();
   const int ph = gfx.fbHeight();
-  const int rowBytes = pageW / 4;
+  const int rowBytes = static_cast<int>(ts::pictureRowBytes(static_cast<uint16_t>(pageW)));
   for (int y = 0; y < pageH; ++y) {
     const int phyX = y;
     if (phyX < 0 || phyX >= pw) {
       continue;
     }
-    const bool black = plane == ReadFace::Plane::Ink;
     const uint8_t bit = static_cast<uint8_t>(1u << (7 - (phyX & 7)));
     const int col = phyX >> 3;
     const uint8_t* row = bits + static_cast<size_t>(y) * static_cast<size_t>(rowBytes);
     for (int x = 0; x < pageW; ++x) {
-      const uint8_t v = static_cast<uint8_t>((row[x >> 2] >> (6 - 2 * (x & 3))) & 3);
-      if (!planeKeep(v, plane)) {
+      if ((row[x >> 3] & static_cast<uint8_t>(0x80u >> (static_cast<unsigned>(x) & 7u))) == 0) {
         continue;
       }
       const int phyY = ph - 1 - x;
       if (phyY < 0 || phyY >= ph) {
         continue;
       }
-      uint8_t* cell = &fb[static_cast<size_t>(phyY) * stride + static_cast<size_t>(col)];
-      if (black) {
-        *cell &= static_cast<uint8_t>(~bit);
-      } else {
-        *cell |= bit;
-      }
+      fb[static_cast<size_t>(phyY) * stride + static_cast<size_t>(col)] &= static_cast<uint8_t>(~bit);
     }
   }
-}
-
-uint8_t pictureAt(const uint8_t* bits, const int pageW, const int x, const int y) {
-  const int rowBytes = pageW / 4;
-  const uint8_t b = bits[static_cast<size_t>(y) * static_cast<size_t>(rowBytes) + static_cast<size_t>(x >> 2)];
-  return static_cast<uint8_t>((b >> (6 - 2 * (x & 3))) & 3);
 }
 
 // Crop the contain-fit rect out of a stored page and scale it into the column box.
@@ -101,11 +81,10 @@ void blitPictureBox(Gfx& gfx, const uint8_t* bits, const int pageW, const int pa
       if (sx < 0 || sx >= pageW) {
         continue;
       }
-      const uint8_t v = pictureAt(bits, pageW, sx, sy);
-      if (!planeKeep(v, plane)) {
+      if (plane != ReadFace::Plane::Ink || !pictureBlack(bits, pageW, sx, sy)) {
         continue;
       }
-      gfx.drawPixel(dstX + dx, dstY + dy, plane == ReadFace::Plane::Ink);
+      gfx.drawPixel(dstX + dx, dstY + dy, true);
     }
   }
 }
@@ -354,9 +333,11 @@ void paintBoxes(Gfx& gfx, const ts::GlyphRun* runs, const uint16_t n, const int 
 }  // namespace
 
 void TypesetBook::paint(Gfx& gfx, const ReadFace::Plane plane) {
-  // Ink is black on white. Gray planes are white marks on black, which is
-  // what the waveform reads as light and dark.
+  // Black on white. Gray planes stay empty.
   gfx.clear(plane != ReadFace::Plane::Ink);
+  if (plane != ReadFace::Plane::Ink) {
+    return;
+  }
   if (loadedPicture != 0) {
     if (pictureBits) {
       blitPicture(gfx, pictureBits, layoutOpt.width, layoutOpt.height, plane);
@@ -369,10 +350,10 @@ void TypesetBook::paint(Gfx& gfx, const ReadFace::Plane plane) {
   const uint16_t pageH = static_cast<uint16_t>(layoutOpt.height);
   auto paintInline = [&](const ts::GlyphRun& g) {
     const uint16_t id = static_cast<uint16_t>(g.cp > 0xFFFFu ? 0xFFFFu : g.cp);
-    if (id == 0 || pageW < 4 || pageH == 0) {
+    if (id == 0 || pageW == 0 || pageH == 0) {
       return;
     }
-    const size_t nbytes = static_cast<size_t>(pageW / 4) * pageH;
+    const size_t nbytes = ts::pictureRowBytes(pageW) * pageH;
     if (scratchPic != id || !pictureBits) {
       uint8_t* dst = ScratchHeap::data();
       if (!dst || ScratchHeap::size() < nbytes ||
@@ -394,16 +375,6 @@ void TypesetBook::paint(Gfx& gfx, const ReadFace::Plane plane) {
     const int dh = g.advance > 0 ? static_cast<int>(g.advance) : 1;
     blitPictureBox(gfx, pictureBits, pageW, pageH, fit.x, fit.y, fit.w, fit.h, g.x, g.y, dw, dh, plane);
   };
-  if (plane != ReadFace::Plane::Ink) {
-    // Glyph stems stay on the ink frame. An inline picture still has gray.
-    for (uint16_t i = 0; i < loadedCount; ++i) {
-      if (ts::runPicture(loadedGlyphs[i])) {
-        paintInline(loadedGlyphs[i]);
-      }
-    }
-    return;
-  }
-
   for (uint16_t i = 0; i < loadedCount; ++i) {
     const ts::GlyphRun& g = loadedGlyphs[i];
     if (ts::runPicture(g)) {
@@ -720,14 +691,14 @@ bool TypesetBook::drawPage(Gfx& gfx, const uint32_t pageIndex, int& pagesUntilFu
     return false;
   }
   const unsigned long layMs = millis() - tLay;
-  // SD and the panel share SPI. Read the page before the grayscale waveform starts.
+  // SD and the panel share SPI. Read the picture before the refresh starts.
   const unsigned long tPic = millis();
   pictureBits = nullptr;
   scratchPic = 0;
   if (loadedPicture != 0) {
     const uint16_t pw = static_cast<uint16_t>(layoutOpt.width);
     const uint16_t ph = static_cast<uint16_t>(layoutOpt.height);
-    const size_t nbytes = static_cast<size_t>(pw / 4) * ph;
+    const size_t nbytes = ts::pictureRowBytes(pw) * ph;
     uint8_t* dst = ScratchHeap::data();
     if (dst && ScratchHeap::size() >= nbytes && ts::pictureRead(picturePath, loadedPicture, pw, ph, dst, nbytes)) {
       pictureBits = dst;
@@ -747,64 +718,24 @@ bool TypesetBook::drawPage(Gfx& gfx, const uint32_t pageIndex, int& pagesUntilFu
 
   const unsigned long tBase = millis();
   if (pagesUntilFullRefresh <= 1) {
-    if (gfx.combinesGrayscaleBase()) {
-      gfx.startGrayscaleBase(HalDisplay::HALF_REFRESH);
-    } else {
-      gfx.present(HalDisplay::HALF_REFRESH);
-      gfx.preconditionGrayscale();
-    }
+    gfx.present(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = refreshFrequency;
   } else {
-    gfx.startGrayscaleBase(HalDisplay::FAST_REFRESH);
+    gfx.present(HalDisplay::FAST_REFRESH);
     --pagesUntilFullRefresh;
   }
-  const unsigned long baseFireMs = millis() - tBase;
-
-  // The fast base refresh still owns SPI. Glyph gray is unmarked, and a miss
-  // must not read the card (that 0xFF slot is the repeating block).
-  font.setSdReads(false);
-  const unsigned long tLsb = millis();
-  paint(gfx, ReadFace::Plane::Lsb);
-  const unsigned long lsbMs = millis() - tLsb;
-
-  const unsigned long tBaseWait = millis();
-  gfx.finishGrayscaleBase();
-  const unsigned long baseWaitMs = millis() - tBaseWait;
-  font.setSdReads(true);
-
-  const unsigned long tLsbCopy = millis();
-  gfx.copyGrayscaleLsbBuffers();
-  const unsigned long lsbCopyMs = millis() - tLsbCopy;
-  paint(gfx, ReadFace::Plane::Msb);
-  const unsigned long tMsbCopy = millis();
-  gfx.copyGrayscaleMsbBuffers();
-  const unsigned long msbCopyMs = millis() - tMsbCopy;
-
-  font.setSdReads(false);
-  gfx.startGrayBuffer();
-  const unsigned long tWait = millis();
-  gfx.finishGrayBuffer();
-  const unsigned long waitMs = millis() - tWait;
-  font.setSdReads(true);
-
-  // Cleanup image for the next page's differential. SPI is idle, so a miss
-  // is a real glyph. Doing this before finishGrayBuffer cached the idle
-  // 0xFF read, and that character stayed a block on every later page.
-  const unsigned long tClean = millis();
-  paint(gfx, ReadFace::Plane::Ink);
-  const unsigned long cleanMs = millis() - tClean;
+  const unsigned long presentMs = millis() - tBase;
   const ReadFace::CacheStats sd1 = font.cacheStats();
   // Milliseconds except sd reads/bytes and the hit/miss counts. spi is the
-  // base send, then the LSB copy, then the MSB copy. wave is the two BUSY waits.
+  // black-and-white refresh.
   LOG_INF("TS",
-          "perf p%lu lay %lu pic %lu ink %lu lsb %lu clean %lu gly %lu rebase %lu spi %lu/%lu/%lu wave %lu+%lu sd %lu/%lu/%lu "
+          "perf p%lu lay %lu pic %lu ink %lu gly %lu rebase %lu spi %lu sd %lu/%lu/%lu "
           "hit+%lu miss+%lu body %u/%u total %lu",
-          static_cast<unsigned long>(pageIndex + 1), layMs, picMs, inkMs, lsbMs, cleanMs, glyMs, rebaseMs, baseFireMs,
-          lsbCopyMs, msbCopyMs, baseWaitMs, waitMs, static_cast<unsigned long>(sd1.sdReads - sd0.sdReads),
+          static_cast<unsigned long>(pageIndex + 1), layMs, picMs, inkMs, glyMs, rebaseMs, presentMs,
+          static_cast<unsigned long>(sd1.sdReads - sd0.sdReads),
           static_cast<unsigned long>(sd1.sdBytes - sd0.sdBytes),
           static_cast<unsigned long>((sd1.sdUs - sd0.sdUs) / 1000u), static_cast<unsigned long>(sd1.hits - sd0.hits),
           static_cast<unsigned long>(sd1.misses - sd0.misses), sd1.bodyUsed, sd1.bodyCap, millis() - tDraw);
-  cleanupPending = true;
   error = "";
   return true;
 }
