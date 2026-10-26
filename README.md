@@ -14,9 +14,7 @@ src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
 lib/Book              book session, 2-bit paint, and the picture sidecar
-lib/BakedFont         built-in mincho and gothic (zlib-packed XGF2)
-lib/XgfFont           prebaked reading face, inflated into PSRAM
-lib/BookFace          baked face, or on-device TrueType when selected
+lib/BookFace          reading face used by books and lists
 lib/ReadFace          TrueType glyphs cached as 2-bit em boxes
 lib/EpdFont           Ubuntu UI fonts
 reference/            CrossPoint submodule (lookup only)
@@ -31,7 +29,7 @@ Firmware update from SD (same idea as CrossPoint):
 - Settings → **Update firmware** → pick a `.bin` → confirm.
 - Recovery picker: hold **Down + Power** at wake (side-right + power). Side-left is GPIO0, a boot strap. Back returns to home.
 
-Reading fonts default to two built-in faces, 明朝 and ゴシック. They cover JIS X 0208 plus ASCII and need no file on the card. On-device rasterization is optional: put a `.ttf`, `.otf`, or `.ttc` in `/.yomu/fonts/` and select it. A prebaked `.xgf2` or `.ygzf` in that folder can be selected the same way. The FreeType build has no CFF driver, so a CFF OpenType such as Hiragino Mincho will not open. Use a TrueType or TrueType-collection face. Face index 0 of a `.ttc` is used. Built-in faces use a fixed em box: horizontal Latin is full-width, and vertical punctuation is the em bitmap rotated in the cell.
+Reading needs a TrueType file. Put a `.ttf`, `.otf`, or `.ttc` in `/.yomu/fonts/` and select it. There is no built-in reading face. The FreeType build has no CFF driver, so a CFF OpenType such as Hiragino Mincho will not open. Use a TrueType or TrueType-collection face. Face index 0 of a `.ttc` is used. Horizontal Latin uses the full em cell. Vertical punctuation uses the face's vertical metrics when it has them.
 
 The stock Xteink updater is gone once this firmware is installed.
 

@@ -15,8 +15,6 @@
   X(on, "オン")                                         \
   X(off, "オフ")                                        \
   X(readingFont, "本文フォント")                        \
-  X(fontMincho, "明朝")                                 \
-  X(fontGothic, "ゴシック")                             \
   X(tiltPageTurn, "傾きでページ送り: %s")               \
   X(gyroAutoOffNone, "ジャイロ自動オフ: なし")          \
   X(gyroAutoOffSec, "ジャイロ自動オフ: %u秒")           \
@@ -59,7 +57,7 @@
   X(goToPage, "ページ指定")                             \
   X(currentlyOnPage, "現在 %lu ページ")                 \
   X(noFonts, "フォントがありません")                    \
-  X(uploadFontHint, "ファイル転送で.ttfや.xgf2を追加")  \
+  X(uploadFontHint, "ファイル転送で.ttfを追加")         \
   X(updatingFirmware, "更新しています")                 \
   X(doNotPowerOff, "電源を切らないでください")          \
   X(updateComplete, "更新が完了しました")               \

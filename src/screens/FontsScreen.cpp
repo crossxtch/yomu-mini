@@ -18,35 +18,9 @@
 
 FontsScreen::FontsScreen(Gfx& gfx, MappedInput& input) : Screen("Fonts", gfx, input) {}
 
-namespace {
-
-const char* faceLabel(const char* id) {
-  if (id && strcmp(id, ReadingFont::kMinchoId) == 0) {
-    return uiText::fontMincho;
-  }
-  if (id && strcmp(id, ReadingFont::kGothicId) == 0) {
-    return uiText::fontGothic;
-  }
-  return id ? id : "";
-}
-
-bool faceActive(const char* id) {
-  if (!id) {
-    return false;
-  }
-  if (strcmp(id, ReadingFont::kMinchoId) == 0) {
-    return settings.fontFile[0] == '\0' || strcmp(settings.fontFile, ReadingFont::kMinchoId) == 0;
-  }
-  return strcmp(settings.fontFile, id) == 0;
-}
-
-}  // namespace
-
 void FontsScreen::load() {
   names.clear();
-  names.reserve(34);
-  names.emplace_back(ReadingFont::kMinchoId);
-  names.emplace_back(ReadingFont::kGothicId);
+  names.reserve(32);
   std::vector<std::string> files;
   files.reserve(32);
   HalFile dir = Storage.open(ReadingFont::kDir);
@@ -71,7 +45,7 @@ void FontsScreen::load() {
   }
   index = 0;
   for (size_t i = 0; i < names.size(); ++i) {
-    if (faceActive(names[i].c_str())) {
+    if (strcmp(names[i].c_str(), settings.fontFile) == 0) {
       index = static_cast<int>(i);
       break;
     }
@@ -144,7 +118,7 @@ void FontsScreen::render() {
   char row[96];
   auto fillRow = [&](const int i) {
     const char* name = names[static_cast<size_t>(i)].c_str();
-    snprintf(row, sizeof(row), "%s%s", faceActive(name) ? "* " : "", faceLabel(name));
+    snprintf(row, sizeof(row), "%s%s", strcmp(name, settings.fontFile) == 0 ? "* " : "", name);
   };
   if (cjk.loaded()) {
     const EpdFontFamily* ui = gfx.font(FONT_UI);

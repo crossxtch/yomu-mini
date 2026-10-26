@@ -222,9 +222,9 @@ footer {
   <div id="dropZone">
     <div class="drop-kicker">upload</div>
     <div class="drop-title">Drop a file</div>
-    <div class="drop-sub">.epub · .txt · .ttf or .xgf2 fonts · firmware .bin</div>
+    <div class="drop-sub">.epub · .txt · .ttf fonts · firmware .bin</div>
   </div>
-  <input type="file" id="fileInput" accept=".epub,.txt,.ttf,.otf,.ttc,.xgf2,.ygzf,.bin">
+  <input type="file" id="fileInput" accept=".epub,.txt,.ttf,.otf,.ttc,.bin">
   <div id="uploadProgress"><span id="uploadBar"></span></div>
   <div id="toolbar">
     <button id="cancelUpload" onclick="cancelUpload()">Cancel</button>
@@ -284,7 +284,7 @@ function resetUploadUi() {
   document.getElementById("cancelUpload").style.display = "none";
   dropZone.classList.remove("busy");
   dropZone.querySelector(".drop-title").textContent = "Drop a file";
-  dropZone.querySelector(".drop-sub").textContent = ".epub · .txt · .ttf or .xgf2 fonts · firmware .bin";
+  dropZone.querySelector(".drop-sub").textContent = ".epub · .txt · .ttf fonts · firmware .bin";
   document.getElementById("fileInput").value = "";
 }
 
@@ -409,15 +409,13 @@ function loadFonts() {
       if (!items.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No fonts yet — drop a .ttf or .xgf2 file";
+        empty.textContent = "No fonts yet — drop a .ttf file";
         list.appendChild(empty);
         return;
       }
-      const builtins = items.filter(item => item.builtin);
-      const files = items.filter(item => !item.builtin);
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      builtins.concat(files).forEach(item => {
-        const label = item.label || item.name;
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      items.forEach(item => {
+        const label = item.name;
         const row = document.createElement("div");
         row.className = "row";
         const meta = document.createElement("div");
@@ -427,7 +425,7 @@ function loadFonts() {
         name.textContent = label + (item.active ? "  ·  in use" : "");
         const sub = document.createElement("div");
         sub.className = "sub";
-        sub.textContent = item.builtin ? "built in" : formatSize(item.size);
+        sub.textContent = formatSize(item.size);
         meta.appendChild(name);
         meta.appendChild(sub);
         const actions = document.createElement("div");
@@ -442,17 +440,15 @@ function loadFonts() {
               .catch(e => status("Error: " + e, "bad"));
           }));
         }
-        if (!item.builtin) {
-          actions.appendChild(actionBtn("Delete", () => {
-            if (!confirm("Delete " + label + "?")) return;
-            fetch("/api/fonts/delete", {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: "name=" + encodeURIComponent(item.name)
-            }).then(r => { if (!r.ok) throw new Error("delete failed"); loadFonts(); status("Deleted " + label, "ok"); })
-              .catch(e => status("Error: " + e, "bad"));
-          }, "danger"));
-        }
+        actions.appendChild(actionBtn("Delete", () => {
+          if (!confirm("Delete " + label + "?")) return;
+          fetch("/api/fonts/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "name=" + encodeURIComponent(item.name)
+          }).then(r => { if (!r.ok) throw new Error("delete failed"); loadFonts(); status("Deleted " + label, "ok"); })
+            .catch(e => status("Error: " + e, "bad"));
+        }, "danger"));
         row.appendChild(meta);
         row.appendChild(actions);
         list.appendChild(row);

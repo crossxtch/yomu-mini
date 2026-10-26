@@ -10,7 +10,4 @@ Copied files retain their original copyright.
 - jp_12 is generated from Noto Sans JP Medium (SIL Open Font License 1.1),
   covering Jōyō kanji, kana, and CJK punctuation for UI text. Extra simplified
   Chinese UI ideographs are taken from Noto Sans SC Medium (OFL 1.1).
-- Built-in reading faces in lib/BakedFont are rasterized from Noto Serif JP
-  (明朝) and Noto Sans JP (ゴシック), SIL Open Font License 1.1. Coverage is
-  JIS X 0208 plus ASCII.
 - freeink-sdk is a sibling dependency (MIT).

@@ -553,8 +553,7 @@ void FileTransferServer::handleUploadEnd(size_t totalBytes) {
   upload.preallocatedSize = 0;
 
   const char* leaf = xfer::basenameOf(upload.destPath.c_str());
-  // A newly uploaded face stays unselected. The built-in mincho remains the
-  // default until the reader picks this file.
+  // A newly uploaded face stays unselected until the reader picks it.
   if (!ReadingFont::isFontFilename(leaf)) {
     BookCache::removeFor(upload.destPath.c_str());
   }

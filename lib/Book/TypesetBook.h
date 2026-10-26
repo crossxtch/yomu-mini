@@ -13,7 +13,7 @@
 
 class Gfx;
 
-// Japanese reader: EPUB (lazahata IR) or UTF-8 text → em-grid + XGF2 blit.
+// Japanese reader: EPUB (lazahata IR) or UTF-8 text → em-grid blit.
 class TypesetBook {
  public:
   TypesetBook() = default;

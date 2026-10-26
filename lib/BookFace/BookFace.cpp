@@ -1,50 +1,9 @@
 #include "BookFace.h"
 
-#include <BakedFont.h>
 #include <Gfx.h>
-#include <Logging.h>
 #include <Memory.h>
 
 #include <cstdio>
-#include <cstring>
-
-namespace {
-
-bool endsWithI(const char* name, const char* ext) {
-  if (!name || !ext) {
-    return false;
-  }
-  const size_t n = strlen(name);
-  const size_t e = strlen(ext);
-  if (n < e) {
-    return false;
-  }
-  for (size_t i = 0; i < e; ++i) {
-    char a = name[n - e + i];
-    if (a >= 'A' && a <= 'Z') {
-      a = static_cast<char>(a - 'A' + 'a');
-    }
-    if (a != ext[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-}  // namespace
-
-BookFace::Source BookFace::classify(const char* path) {
-  if (path && strcmp(path, BakedFont::kGothicPath) == 0) {
-    return Source::Gothic;
-  }
-  if (path && (strcmp(path, BakedFont::kMinchoPath) == 0 || path[0] == '\0')) {
-    return Source::Mincho;
-  }
-  if (endsWithI(path, ".xgf2") || endsWithI(path, ".ygzf")) {
-    return Source::BakedFile;
-  }
-  return Source::Raster;
-}
 
 bool BookFace::load(const char* path, const uint32_t lruMaxBytes, const bool wantRuby) {
   close();
@@ -53,63 +12,21 @@ bool BookFace::load(const char* path, const uint32_t lruMaxBytes, const bool wan
     return false;
   }
   snprintf(key, sizeof(key), "%s", path);
-  const Source source = classify(path);
-  switch (source) {
-    case Source::Mincho:
-    case Source::Gothic: {
-      const BakedFont::Kind kind = source == Source::Gothic ? BakedFont::Kind::Gothic : BakedFont::Kind::Mincho;
-      const uint8_t* packed = nullptr;
-      size_t n = 0;
-      if (!BakedFont::bytes(kind, packed, n)) {
-        error = "font missing";
-        return false;
-      }
-      baked = makeUniqueNoThrow<XgfFont>();
-      if (!baked) {
-        error = "out of memory";
-        return false;
-      }
-      if (!baked->loadPacked(packed, n, wantRuby)) {
-        error = baked->lastError();
-        baked.reset();
-        return false;
-      }
-      return true;
-    }
-    case Source::BakedFile: {
-      baked = makeUniqueNoThrow<XgfFont>();
-      if (!baked) {
-        error = "out of memory";
-        return false;
-      }
-      if (!baked->load(path, wantRuby)) {
-        error = baked->lastError();
-        baked.reset();
-        return false;
-      }
-      return true;
-    }
-    case Source::Raster: {
-      raster = makeUniqueNoThrow<ReadFace>();
-      if (!raster) {
-        error = "out of memory";
-        return false;
-      }
-      if (!raster->load(path, lruMaxBytes, wantRuby)) {
-        error = raster->lastError();
-        raster.reset();
-        return false;
-      }
-      return true;
-    }
+  raster = makeUniqueNoThrow<ReadFace>();
+  if (!raster) {
+    error = "out of memory";
+    return false;
   }
-  error = "font missing";
-  return false;
+  if (!raster->load(path, lruMaxBytes, wantRuby)) {
+    error = raster->lastError();
+    raster.reset();
+    return false;
+  }
+  return true;
 }
 
 void BookFace::close() {
   raster.reset();
-  baked.reset();
   key[0] = '\0';
   error = "not loaded";
 }
@@ -117,82 +34,44 @@ void BookFace::close() {
 void BookFace::releaseMaps() {
   if (raster) {
     raster->releaseMaps();
-  } else if (baked) {
-    baked->releaseMaps();
   }
 }
 
 bool BookFace::restoreMaps() {
-  if (raster) {
-    return raster->restoreMaps();
-  }
-  if (baked) {
-    return baked->restoreMaps();
-  }
-  return false;
+  return raster && raster->restoreMaps();
 }
 
 void BookFace::releaseFile() {
   if (raster) {
     raster->releaseFile();
-  } else if (baked) {
-    baked->releaseFile();
   }
 }
 
 bool BookFace::reopenFile() {
-  if (raster) {
-    return raster->reopenFile();
-  }
-  if (baked) {
-    return baked->reopenFile();
-  }
-  return false;
+  return raster && raster->reopenFile();
 }
 
 uint8_t BookFace::emPx() const {
-  if (raster) {
-    return raster->emPx();
-  }
-  if (baked) {
-    return baked->emPx();
-  }
-  return 0;
+  return raster ? raster->emPx() : 0;
 }
 
 uint8_t BookFace::rubyEmPx() const {
-  if (raster) {
-    return raster->rubyEmPx();
-  }
-  if (baked) {
-    return baked->rubyEmPx();
-  }
-  return 0;
+  return raster ? raster->rubyEmPx() : 0;
 }
 
 uint16_t BookFace::glyphId(const uint32_t cp) const {
-  if (raster) {
-    return raster->glyphId(cp);
-  }
-  if (baked) {
-    return baked->glyphId(cp);
-  }
-  return 0xFFFF;
+  return raster ? raster->glyphId(cp) : 0xFFFF;
 }
 
 void BookFace::prewarm(const uint16_t* bodyIds, const uint16_t count, const bool ruby) {
   if (raster) {
     raster->prewarm(bodyIds, count, ruby);
-  } else if (baked) {
-    baked->prewarm(bodyIds, count, ruby);
   }
 }
 
 void BookFace::setSdReads(const bool allow) {
   if (raster) {
     raster->setSdReads(allow);
-  } else if (baked) {
-    baked->setSdReads(allow);
   }
 }
 
@@ -200,73 +79,37 @@ bool BookFace::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) con
   if (raster) {
     return raster->probe(bodyId, ruby, out);
   }
-  if (baked) {
-    return baked->probe(bodyId, ruby, out);
-  }
   out = {};
   return false;
 }
 
 BookFace::CacheStats BookFace::cacheStats() const {
-  if (raster) {
-    return raster->cacheStats();
-  }
-  if (baked) {
-    return baked->cacheStats();
-  }
-  return {};
+  return raster ? raster->cacheStats() : CacheStats{};
 }
 
 int16_t BookFace::advancePx(const uint32_t cp, const int px) {
-  if (raster) {
-    return raster->advancePx(cp, px);
-  }
-  if (baked) {
-    return baked->advancePx(cp, px);
-  }
-  return 0;
+  return raster ? raster->advancePx(cp, px) : 0;
 }
 
 bool BookFace::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const bool ruby, const bool rotate90,
                     const Plane plane) {
-  if (raster) {
-    return raster->blit(gfx, x, y, bodyId, ruby, rotate90, plane);
-  }
-  if (baked) {
-    return baked->blit(gfx, x, y, bodyId, ruby, rotate90, plane);
-  }
-  return false;
+  return raster && raster->blit(gfx, x, y, bodyId, ruby, rotate90, plane);
 }
 
 bool BookFace::blitCell(Gfx& gfx, const int x, const int y, const int cellW, const int cellH, const uint16_t bodyId,
                         const int px, const bool vertical, const bool bold, const bool rotate90, const bool yakumono,
                         const Plane plane) {
-  if (raster) {
-    return raster->blitCell(gfx, x, y, cellW, cellH, bodyId, px, vertical, bold, rotate90, yakumono, plane);
-  }
-  if (baked) {
-    return baked->blitCell(gfx, x, y, cellW, cellH, bodyId, px, vertical, bold, rotate90, yakumono, plane);
-  }
-  return false;
+  return raster && raster->blitCell(gfx, x, y, cellW, cellH, bodyId, px, vertical, bold, rotate90, yakumono, plane);
 }
 
 bool BookFace::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const Plane plane) {
-  if (raster) {
-    return raster->blitBox(gfx, x, y, bodyId, size, plane);
-  }
-  if (baked) {
-    return baked->blitBox(gfx, x, y, bodyId, size, plane);
-  }
-  return false;
+  return raster && raster->blitBox(gfx, x, y, bodyId, size, plane);
 }
 
 int BookFace::drawUtf8(Gfx& gfx, const int fontId, const int x, const int y, const char* text, const bool black,
                        const int maxX) {
   if (raster) {
     return raster->drawUtf8(gfx, fontId, x, y, text, black, maxX);
-  }
-  if (baked) {
-    return baked->drawUtf8(gfx, fontId, x, y, text, black, maxX);
   }
   gfx.drawText(fontId, x, y, text ? text : "", black);
   return text ? gfx.textWidth(fontId, text) : 0;

@@ -1,6 +1,5 @@
 #include "core/ReadingFont.h"
 
-#include <BakedFont.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -30,8 +29,7 @@ bool endsWithI(const char* name, const char* ext) {
 }
 
 bool fontExt(const char* name) {
-  return endsWithI(name, ".ttf") || endsWithI(name, ".otf") || endsWithI(name, ".ttc") || endsWithI(name, ".xgf2") ||
-         endsWithI(name, ".ygzf");
+  return endsWithI(name, ".ttf") || endsWithI(name, ".otf") || endsWithI(name, ".ttc");
 }
 
 bool illegalFatChar(const char c) {
@@ -40,7 +38,7 @@ bool illegalFatChar(const char c) {
 
 bool stripDuplicateExt(char* name) {
   const size_t n = strlen(name);
-  for (const char* ext : {".ttf", ".otf", ".ttc", ".xgf2", ".ygzf"}) {
+  for (const char* ext : {".ttf", ".otf", ".ttc"}) {
     const size_t e = strlen(ext);
     if (n > e * 2 && endsWithI(name, ext) && endsWithI(name + n - e * 2, ext)) {
       name[n - e] = '\0';
@@ -55,10 +53,12 @@ bool stripDuplicateExt(char* name) {
 void ReadingFont::migrate() {
   Storage.ensureDirectoryExists(Settings::kDir);
   Storage.ensureDirectoryExists(kDir);
-}
-
-bool ReadingFont::isBuiltinId(const char* name) {
-  return name && (strcmp(name, kMinchoId) == 0 || strcmp(name, kGothicId) == 0);
+  // A stored *mincho, *gothic, or .xgf2 name is no longer a face.
+  if (settings.fontFile[0] != '\0' && !isFontFilename(settings.fontFile)) {
+    LOG_INF("FONT", "Dropping %s", settings.fontFile);
+    settings.fontFile[0] = '\0';
+    settings.save();
+  }
 }
 
 bool ReadingFont::isFontFilename(const char* name) {
@@ -105,31 +105,21 @@ bool ReadingFont::activePath(char* out, const size_t outSize) {
   if (!out || outSize == 0) {
     return false;
   }
+  out[0] = '\0';
   const char* id = settings.fontFile;
-  if (id[0] == '\0' || strcmp(id, kMinchoId) == 0) {
-    snprintf(out, outSize, "%s", BakedFont::kMinchoPath);
-    return true;
-  }
-  if (strcmp(id, kGothicId) == 0) {
-    snprintf(out, outSize, "%s", BakedFont::kGothicPath);
-    return true;
+  if (!isFontFilename(id)) {
+    return false;
   }
   makePath(out, outSize, id);
   if (Storage.exists(out)) {
     return true;
   }
-  LOG_INF("FONT", "Missing %s, using mincho", id);
-  snprintf(out, outSize, "%s", BakedFont::kMinchoPath);
-  return true;
+  LOG_INF("FONT", "Missing %s", id);
+  out[0] = '\0';
+  return false;
 }
 
 bool ReadingFont::setActive(const char* filename) {
-  if (isBuiltinId(filename)) {
-    snprintf(settings.fontFile, sizeof(settings.fontFile), "%s", filename);
-    settings.save();
-    LOG_INF("FONT", "Active %s", filename);
-    return true;
-  }
   char name[kMaxFileName + 1];
   if (!copyFilename(name, sizeof(name), filename)) {
     return false;

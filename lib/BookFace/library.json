@@ -3,9 +3,7 @@
   "version": "0.1.0",
   "dependencies": {
     "ReadFace": "*",
-    "XgfFont": "*",
-    "BakedFont": "*",
     "Memory": "*",
-    "Logging": "*"
+    "Gfx": "*"
   }
 }

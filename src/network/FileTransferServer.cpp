@@ -319,23 +319,6 @@ void FileTransferServer::handleFonts() const {
   json.reserve(768);
   json.push_back('[');
   bool first = true;
-  auto appendBuiltin = [&](const char* name, const char* label, const bool active) {
-    if (!first) {
-      json.push_back(',');
-    }
-    first = false;
-    json += "{\"name\":\"";
-    xfer::appendJsonEscaped(json, name);
-    json += "\",\"label\":\"";
-    xfer::appendJsonEscaped(json, label);
-    json += "\",\"builtin\":true,\"size\":0,\"active\":";
-    json += active ? "true" : "false";
-    json += "}";
-  };
-  const bool minchoOn =
-      settings.fontFile[0] == '\0' || strcmp(settings.fontFile, ReadingFont::kMinchoId) == 0;
-  appendBuiltin(ReadingFont::kMinchoId, "明朝", minchoOn);
-  appendBuiltin(ReadingFont::kGothicId, "ゴシック", strcmp(settings.fontFile, ReadingFont::kGothicId) == 0);
   if (dir && dir.isDirectory()) {
     char name[HalFile::kMaxNameBytes];
     size_t listed = 0;
@@ -353,7 +336,7 @@ void FileTransferServer::handleFonts() const {
       ++listed;
       json += "{\"name\":\"";
       xfer::appendJsonEscaped(json, name);
-      json += "\",\"builtin\":false,\"size\":";
+      json += "\",\"size\":";
       json += std::to_string(file.fileSize());
       json += ",\"active\":";
       json += (settings.fontFile[0] && strcmp(name, settings.fontFile) == 0) ? "true" : "false";
@@ -379,10 +362,6 @@ void FileTransferServer::handleFontSelect() {
 void FileTransferServer::handleFontDelete() {
   if (!server->hasArg("name")) {
     server->send(400, "text/plain", "Missing name");
-    return;
-  }
-  if (ReadingFont::isBuiltinId(server->arg("name").c_str())) {
-    server->send(400, "text/plain", "Built-in font");
     return;
   }
   char fileName[ReadingFont::kMaxFileName + 1];

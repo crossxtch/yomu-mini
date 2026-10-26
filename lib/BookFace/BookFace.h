@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ReadFace.h>
-#include <XgfFont.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -9,8 +8,8 @@
 
 class Gfx;
 
-// The face a book or a list draws with. A prebaked XGF2 is the usual case.
-// A TrueType path rasterizes on device.
+// The face a book or a list draws with. A TrueType file on the card is
+// rasterized on device.
 class BookFace {
  public:
   using Plane = ReadFace::Plane;
@@ -25,7 +24,7 @@ class BookFace {
 
   bool load(const char* path, uint32_t lruMaxBytes = ReadFace::kLruBytes, bool wantRuby = true);
   void close();
-  bool loaded() const { return raster || baked; }
+  bool loaded() const { return static_cast<bool>(raster); }
   const char* lastError() const { return error; }
 
   void releaseMaps();
@@ -52,12 +51,7 @@ class BookFace {
   void metricsId(char* out, size_t outSize) const;
 
  private:
-  enum class Source : uint8_t { Mincho, Gothic, BakedFile, Raster };
-
-  static Source classify(const char* path);
-
   std::unique_ptr<ReadFace> raster;
-  std::unique_ptr<XgfFont> baked;
   char key[192]{};
   const char* error = "not loaded";
 };

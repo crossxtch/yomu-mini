@@ -19,7 +19,7 @@ constexpr uint32_t kInkThreshold = 1;
 constexpr uint16_t kMaxCached = 4096;
 
 uint8_t quantize(const uint8_t coverage) {
-  // Same bins as the Mac XGF encoder: 255 is solid ink.
+  // 255 is solid ink.
   if (coverage >= 192) return 3;
   if (coverage >= 128) return 2;
   if (coverage >= 64) return 1;
