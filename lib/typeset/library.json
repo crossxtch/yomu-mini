@@ -1,0 +1,12 @@
+{
+  "name": "typeset",
+  "version": "0.1.0",
+  "dependencies": {
+    "Utf8": "*",
+    "Logging": "*",
+    "hal": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

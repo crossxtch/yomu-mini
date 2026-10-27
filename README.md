@@ -2,7 +2,7 @@
 
 EPUB and plain-text reader for the Xteink X4 Classic. This checkout is `yomu-mini`. On the device the name is yomu. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
 
-The panel is 800×480 landscape. UI and pages are 480×800 portrait. Book opening and page layout come from the sibling `typeset` repo.
+The panel is 800×480 landscape. UI and pages are 480×800 portrait. Book opening and page layout live in `lib/typeset`. `lib/Book` drives that on the device.
 
 ## Layout
 
@@ -13,6 +13,7 @@ src/screens/          home, browser, reader, chapters, settings, update
 src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
+lib/typeset           EPUB, text, and page layout
 lib/Book              book session, 1-bit paint, and the picture sidecar
 lib/BookFace          reading face used by books and lists
 lib/ReadFace          TrueType glyphs cached as 1-bit em boxes

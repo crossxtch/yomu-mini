@@ -1,6 +1,6 @@
-// c++ -std=c++20 -I ../typeset/src -I lib/Utf8 \
-//   tools/xgf2/test_htmlir.cpp ../typeset/src/HtmlSax.cpp ../typeset/src/HtmlIR.cpp \
-//   ../typeset/src/FaceCss.cpp lib/Utf8/Utf8.cpp -o /tmp/test_htmlir && /tmp/test_htmlir
+// c++ -std=c++20 -I lib/typeset/src -I lib/Utf8 \
+//   tools/xgf2/test_htmlir.cpp lib/typeset/src/HtmlSax.cpp lib/typeset/src/HtmlIR.cpp \
+//   lib/typeset/src/FaceCss.cpp lib/Utf8/Utf8.cpp -o /tmp/test_htmlir && /tmp/test_htmlir
 
 #include "HtmlIR.h"
 
